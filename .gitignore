@@ -1,5 +1,0 @@
-*.npy
-*.png
-*:Zone.Identifier
-__pycache__/
-/.vscode/
