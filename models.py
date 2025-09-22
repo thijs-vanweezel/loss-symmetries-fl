@@ -36,3 +36,62 @@ class Mid8x8to10(nnx.Module):
         x = nnx.relu(x)
         x = self.layer5(x)
         return x
+
+# Used in resnet
+class ResNetBlock(nnx.Module):
+    def __init__(self, key:nnx.RngKey, in_kernels:int, out_kernels:int, strides:int=1, **kwargs):
+        super().__init__(**kwargs)
+        self.strides = strides
+        self.conv1 = nnx.Conv(
+            in_features=in_kernels,
+            out_features=out_kernels,
+            kernel_size=1,
+            strides=strides,
+            padding="SAME",
+            rngs=key
+        )
+        self.norm1 = nnx.BatchNorm(out_kernels, rngs=key)
+        self.conv2 = nnx.Conv(
+            in_features=out_kernels,
+            out_features=out_kernels,
+            kernel_size=1,
+            padding="SAME",
+            rngs=key
+        )
+        self.norm2 = nnx.BatchNorm(out_kernels, rngs=key)
+        if strides>1:
+            self.id_conv = nnx.Conv(out_kernels, out_kernels, kernel_size=1, strides=strides, rngs=key)
+
+    def __call__(self, x, train=True):
+        res = x if self.strides==1 else self.id_conv(x)
+        x = self.conv1(x)
+        x = self.norm1(x, use_running_average=not train)
+        x = nnx.relu(x)
+        x = self.conv2(x)
+        x = self.norm2(x, use_running_average=not train)
+        x = res+x
+        return x
+
+# Resnet-34 for ImageNet
+class ResNet(nnx.Module):
+    def __init__(self, key:nnx.RngKey, block=ResNetBlock, layers=[3,4,6,3], kernels=[64,128,256,512], num_classes=1000, **kwargs):
+        super().__init__(**kwargs)
+        self.conv = nnx.Conv(3, 64, kernel_size=7, strides=2, padding="SAME", rngs=key)
+        self.layers = []
+        for j, l in enumerate(layers):
+            for i in range(l):
+                k_in = ([64]+kernels)[j] if i==0 else kernels[j]
+                k_out = kernels[j]
+                s = 2 if i==0 and j>0 else 1
+                self.layers.append(block(key, k_in, k_out, strides=s))
+        self.fc = nnx.Linear(kernels[-1], num_classes, rngs=key)
+
+    def __call__(self, x, train=True):
+        x = self.conv(x)
+        x = nnx.relu(x)
+        x = nnx.max_pool(x, window_shape=(3,3), strides=(2,2), padding="SAME")
+        for layer in self.layers:
+            x = layer(x, train=train)
+        x = jnp.mean(x, axis=(1,2))
+        x = self.fc(x)
+        return x
