@@ -17,7 +17,7 @@ def return_train_step(ell):
 def get_updates(model_g, models):
     params = jax.tree.leaves(models)
     params_g = jax.tree.leaves(model_g)
-    return jax.tree.map(lambda pg, p: p-pg, params_g, params) # list of length n_layers of arrays of shape (n_clients, layer_shape)
+    return jax.tree.map(lambda pg, p: p-pg, params_g, params) # list of length n_layers with arrays of shape (n_clients, layer_shape)
 
 def aggregate(model_g, updates, n):
     # Get model structure
@@ -76,5 +76,5 @@ def train(Model, opt, x_train, y_train, x_val, y_val, ell, local_epochs, filenam
         with NpyAppendArray(filename) as f:
             f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(models)], axis=1))
 
-    # Purely for the angles experiment
+    # Returns all kinds of output for the various analyses
     return updates

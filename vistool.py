@@ -2,6 +2,7 @@ import optax, scipy, numpy as np, matplotlib as mpl
 from jax import numpy as jnp
 from flax import nnx
 from matplotlib import pyplot as plt
+plt.style.use("seaborn-v0_8-pastel")
 
 def pca_plot(pca, model_idx, x, y, reconstruct, filename, epochs, reduced_params=None, all_params=None, beta_min=None, alpha_min=None, alpha_max=None, beta_max=None, points=30, levels=15, type="density", labels=True):
     if reduced_params is None:
