@@ -39,14 +39,14 @@ class Mid8x8to10(nnx.Module):
 
 # Used in resnet
 class ResNetBlock(nnx.Module):
-    def __init__(self, key:nnx.RngKey, in_kernels:int, out_kernels:int, strides:int=1, **kwargs):
-        super().__init__(**kwargs)
-        self.strides = strides
+    def __init__(self, key:nnx.RngKey, in_kernels:int, out_kernels:int, stride:int=1):
+        super().__init__()
+        self.stride = stride
         self.conv1 = nnx.Conv(
             in_features=in_kernels,
             out_features=out_kernels,
-            kernel_size=1,
-            strides=strides,
+            kernel_size=(3,3),
+            strides=(stride,stride),
             padding="SAME",
             rngs=key
         )
@@ -54,16 +54,16 @@ class ResNetBlock(nnx.Module):
         self.conv2 = nnx.Conv(
             in_features=out_kernels,
             out_features=out_kernels,
-            kernel_size=1,
+            kernel_size=(3,3),
             padding="SAME",
             rngs=key
         )
         self.norm2 = nnx.BatchNorm(out_kernels, rngs=key)
-        if strides>1:
-            self.id_conv = nnx.Conv(out_kernels, out_kernels, kernel_size=1, strides=strides, rngs=key)
+        if stride>1 and in_kernels!=out_kernels:
+            self.id_conv = nnx.Conv(in_kernels, out_kernels, kernel_size=(1,1), strides=(stride, stride), rngs=key)
 
     def __call__(self, x, train=True):
-        res = x if self.strides==1 else self.id_conv(x)
+        res = x if self.stride==1 else self.id_conv(x)
         x = self.conv1(x)
         x = self.norm1(x, use_running_average=not train)
         x = nnx.relu(x)
@@ -76,14 +76,14 @@ class ResNetBlock(nnx.Module):
 class ResNet(nnx.Module):
     def __init__(self, key:nnx.RngKey, block=ResNetBlock, layers=[3,4,6,3], kernels=[64,128,256,512], num_classes=1000, **kwargs):
         super().__init__(**kwargs)
-        self.conv = nnx.Conv(3, 64, kernel_size=7, strides=2, padding="SAME", rngs=key)
+        self.conv = nnx.Conv(3, 64, kernel_size=(7,7), strides=(2,2), padding="SAME", rngs=key)
         self.layers = []
         for j, l in enumerate(layers):
             for i in range(l):
                 k_in = ([64]+kernels)[j] if i==0 else kernels[j]
                 k_out = kernels[j]
                 s = 2 if i==0 and j>0 else 1
-                self.layers.append(block(key, k_in, k_out, strides=s))
+                self.layers.append(block(key, k_in, k_out, stride=s))
         self.fc = nnx.Linear(kernels[-1], num_classes, rngs=key)
 
     def __call__(self, x, train=True):
