@@ -50,22 +50,24 @@ class Imagenet(Dataset):
     def __getitem__(self, idx):
         fp = self.paths[idx]
         img = torchvision.io.read_image(fp).float() / 255.
-        if img.shape[1]<128 or img.shape[2]<128:
-            print("wont work")
-        if img.shape[0]!=3:
-            print("wont work")
+        if img.shape[1]<128 or img.shape[2]<128 or img.shape[0]!=3:
+            del self.paths[idx]
+            os.remove(fp)
+            return self.__getitem__(idx)
         label = self.classes.index(fp.split("/")[-2].rstrip(".JPEG"))
         label = torch.eye(1000)[label].float()
         return img, label
     
 def jax_collate(batch):
+    imgs, labels = zip(*batch)
     # Find minimum height and width in this batch
-    min_height = min(img.shape[1] for img, _ in batch)
-    min_width = min(img.shape[2] for img, _ in batch)
+    min_height = min(img.shape[1] for img in imgs)
+    min_width = min(img.shape[2] for img in imgs)
     # Resize images to the minimum height and width
-    batch = [(torchvision.transforms.functional.resize(img, (min_height, min_width)), label) for img, label in batch]
-    print(f"Resized batch to {min_height}x{min_width}")
-    # Convert to jax
-    return jax.tree.map(jnp.asarray, default_collate(batch))
+    imgs = [torchvision.transforms.functional.resize(img, (min_height, min_width)) for img in imgs]
+    # Convert and concat
+    imgs = jnp.stack([jnp.swapaxes(jnp.asarray(img), 0, -1) for img in imgs])
+    labels = jnp.stack([jnp.asarray(label) for label in labels])
+    return imgs, labels
 
 create_imagenet = lambda *args, **kwargs: DataLoader(Imagenet(*args, **kwargs), batch_size=64, shuffle=True, collate_fn=jax_collate)
