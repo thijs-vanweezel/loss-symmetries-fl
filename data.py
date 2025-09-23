@@ -1,9 +1,10 @@
 from scipy.ndimage import rotate
 from sklearn.datasets import load_digits
-import jax
+import jax, os, torchvision, torch
+from torch.utils.data import Dataset, DataLoader, default_collate
 from jax import numpy as jnp
 
-def create_digits(beta, batch_size=64, shuffle_per_client=False, n_clients=4, client_overlap=1.):
+def create_digits(beta, batch_size=64, n_clients=4, client_overlap=1.):
     # Note: n_clients must be 4 for now due implementation limitations, and shuffle_per_client is not implemented
     # Data 
     x, y, = load_digits(return_X_y=True)
@@ -36,3 +37,35 @@ def create_digits(beta, batch_size=64, shuffle_per_client=False, n_clients=4, cl
     x_train = jnp.swapaxes(x_train[:excess].reshape(num_batches, batch_size, n_clients, 8, 8, 1), 1, 2)
     y_train = jnp.swapaxes(y_train[:excess].reshape(num_batches, batch_size, n_clients, -1), 1, 2)
     return x_train, y_train, x_val, y_val, x_test, y_test
+
+class Imagenet(Dataset):
+    def __init__(self, split="train"):
+        g = os.walk(f"./data/Data/CLS-LOC/{split}", topdown=True)
+        self.classes = next(g)[1]
+        self.paths = [os.path.join(dirname, f) for (dirname, _, filenames) in g for f in filenames]
+
+    def __len__(self):
+        return len(self.paths)
+
+    def __getitem__(self, idx):
+        fp = self.paths[idx]
+        img = torchvision.io.read_image(fp).float() / 255.
+        if img.shape[1]<128 or img.shape[2]<128:
+            print("wont work")
+        if img.shape[0]!=3:
+            print("wont work")
+        label = self.classes.index(fp.split("/")[-2].rstrip(".JPEG"))
+        label = torch.eye(1000)[label].float()
+        return img, label
+    
+def jax_collate(batch):
+    # Find minimum height and width in this batch
+    min_height = min(img.shape[1] for img, _ in batch)
+    min_width = min(img.shape[2] for img, _ in batch)
+    # Resize images to the minimum height and width
+    batch = [(torchvision.transforms.functional.resize(img, (min_height, min_width)), label) for img, label in batch]
+    print(f"Resized batch to {min_height}x{min_width}")
+    # Convert to jax
+    return jax.tree.map(jnp.asarray, default_collate(batch))
+
+create_imagenet = lambda *args, **kwargs: DataLoader(Imagenet(*args, **kwargs), batch_size=64, shuffle=True, collate_fn=jax_collate)
