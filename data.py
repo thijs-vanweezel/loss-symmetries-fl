@@ -1,6 +1,6 @@
 from scipy.ndimage import rotate
 from sklearn.datasets import load_digits
-import jax, os, torchvision, torch
+import jax, os, torchvision, torch, random
 from torch.utils.data import Dataset, DataLoader, default_collate
 from jax import numpy as jnp
 from functools import partial
@@ -41,10 +41,12 @@ def create_digits(beta, batch_size=64, n_clients=4, client_overlap=1.):
     return x_train, y_train, x_val, y_val, x_test, y_test
 
 class Imagenet(Dataset):
-    def __init__(self, data_path="./data/Data/CLS-LOC/train"):
+    def __init__(self, data_path):
+        random.seed(42)
         g = os.walk(data_path, topdown=True)
         self.classes = next(g)[1]
         self.paths = [os.path.join(dirname, f) for (dirname, _, filenames) in g for f in filenames]
+        random.shuffle(self.paths)
 
     def __len__(self):
         return len(self.paths)
@@ -53,7 +55,7 @@ class Imagenet(Dataset):
         fp = self.paths[idx]
         img = torchvision.io.read_image(fp).float()
         if img.shape[1]<128 or img.shape[2]<128 or img.shape[0]!=3:
-            del self.paths[idx]
+            del self.paths[idx] # TODO: affects length of dataset
             os.remove(fp)
             return self.__getitem__(idx)
         label = self.classes.index(fp.split("/")[-2].rstrip(".JPEG"))
@@ -74,20 +76,23 @@ def jax_collate(batch, n, key, feature_beta, label_beta, sample_overlap):
     # Create feature skew augmentations 
     # TODO: check that these four distributions are equally different from each other?
     imgs_rot = jnp.rot90(imgs, k=2, axes=(1,2))
-    imgs_inv = 1-imgs
-    imgs_inv_rot = jnp.rot90(1-imgs, k=2, axes=(1,2))
+    imgs_inv = 255.-imgs
+    imgs_inv_rot = jnp.rot90(255.-imgs, k=2, axes=(1,2))
     all_augs = jnp.stack([imgs, imgs_rot, imgs_inv, imgs_inv_rot], axis=0)
-    # Create n heterogeneous skews by randomly summing the four augmentations, while equally representing them globally
-    proportions = jax.random.uniform(key, (n,4))
-    proportions /= jnp.sum(proportions, axis=0, keepdims=True)
-    proportions = proportions[...,None,None,None,None]
-    clients_imgs = all_augs*proportions
+    globals()["all_augs"] = all_augs  # for debugging   
+    # Give each client a unique distribution by randomly summing the four augmentations (while globally equally representing each augmentation)
+    weights = jax.vmap(jnp.roll, in_axes=(0,0,None))(jnp.tile(jnp.linspace(0,1,n), (4, 1)), jnp.arange(4), None).T
+    weights = weights[...,None,None,None,None]
+    globals()["weights"] = weights  # for debugging
+    clients_imgs = all_augs*weights
     clients_imgs = clients_imgs.sum(axis=1)
     # Scale to [0,1] because we lost that guarantee
     clients_imgs = (clients_imgs - clients_imgs.min(axis=0)) / (clients_imgs.max(axis=0) - clients_imgs.min(axis=0))
+    globals()["clients_imgs"] = clients_imgs  # for debugging
     # Share samples between the fully heterogeneous clients according to the provided beta
     mix_frac = int(feature_beta*clients_imgs.shape[1])
     mix_idx = jax.random.choice(key, jnp.arange(clients_imgs.shape[1]), (mix_frac,), replace=False)
+    print("mix_idx", mix_idx)
     mix_idx_inv = jnp.isin(jnp.arange(clients_imgs.shape[1]), mix_idx, invert=True)
     mix_samples = jnp.tile(clients_imgs[:, mix_idx].reshape(-1, *clients_imgs.shape[2:]), (n,1,1,1,1))
     clients_imgs = jnp.concat([mix_samples, clients_imgs[:, mix_idx_inv]], axis=1)
@@ -97,7 +102,7 @@ def jax_collate(batch, n, key, feature_beta, label_beta, sample_overlap):
     labels = jnp.concat([mix_labels, labels[:,mix_idx_inv]], axis=1)
     return clients_imgs, labels
 
-def create_imagenet(path, n, key, feature_beta, label_beta, sample_overlap, batch_size, **kwargs):
+def create_imagenet(path="./data/Data/CLS-LOC/train", n=4, key=jax.random.key(42), feature_beta=0., label_beta=0., sample_overlap=1., batch_size=40, **kwargs):
     # TODO: batch size should be recalculated
     return DataLoader(
         Imagenet(path),
@@ -105,3 +110,5 @@ def create_imagenet(path, n, key, feature_beta, label_beta, sample_overlap, batc
         collate_fn=partial(jax_collate, n=n, key=key, feature_beta=feature_beta, label_beta=label_beta, sample_overlap=sample_overlap),
         **kwargs
     )
+
+class_name = lambda ds, y: {class_name: name for line in open("data/mapping.txt").read().splitlines() for class_name, name in [line.split(" ", 1)]}[ds.dataset.classes[y.argmax()]]
