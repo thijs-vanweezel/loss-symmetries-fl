@@ -3,9 +3,11 @@ from sklearn.datasets import load_digits
 import jax, os, torchvision, torch
 from torch.utils.data import Dataset, DataLoader, default_collate
 from jax import numpy as jnp
+from functools import partial
 
 def create_digits(beta, batch_size=64, n_clients=4, client_overlap=1.):
     # Note: n_clients must be 4 for now due implementation limitations, and shuffle_per_client is not implemented
+    # Note: beta=1 is IID, beta=0 is most non-IID
     # Data 
     x, y, = load_digits(return_X_y=True)
     x, y = jnp.array(x).reshape(-1,8,8,1), jnp.array(y)
@@ -39,8 +41,8 @@ def create_digits(beta, batch_size=64, n_clients=4, client_overlap=1.):
     return x_train, y_train, x_val, y_val, x_test, y_test
 
 class Imagenet(Dataset):
-    def __init__(self, split="train"):
-        g = os.walk(f"./data/Data/CLS-LOC/{split}", topdown=True)
+    def __init__(self, data_path="./data/Data/CLS-LOC/train"):
+        g = os.walk(data_path, topdown=True)
         self.classes = next(g)[1]
         self.paths = [os.path.join(dirname, f) for (dirname, _, filenames) in g for f in filenames]
 
@@ -49,7 +51,7 @@ class Imagenet(Dataset):
 
     def __getitem__(self, idx):
         fp = self.paths[idx]
-        img = torchvision.io.read_image(fp).float() / 255.
+        img = torchvision.io.read_image(fp).float()
         if img.shape[1]<128 or img.shape[2]<128 or img.shape[0]!=3:
             del self.paths[idx]
             os.remove(fp)
@@ -57,8 +59,8 @@ class Imagenet(Dataset):
         label = self.classes.index(fp.split("/")[-2].rstrip(".JPEG"))
         label = torch.eye(1000)[label].float()
         return img, label
-    
-def jax_collate(batch):
+
+def jax_collate(batch, n, key, feature_beta, label_beta, sample_overlap):
     imgs, labels = zip(*batch)
     # Find minimum height and width in this batch
     min_height = min(img.shape[1] for img in imgs)
@@ -66,8 +68,40 @@ def jax_collate(batch):
     # Resize images to the minimum height and width
     imgs = [torchvision.transforms.functional.resize(img, (min_height, min_width)) for img in imgs]
     # Convert and concat
-    imgs = jnp.stack([jnp.swapaxes(jnp.asarray(img), 0, -1) for img in imgs])
+    imgs = jnp.swapaxes(jnp.stack([jnp.asarray(img) for img in imgs]), 1, -1) # HWC
     labels = jnp.stack([jnp.asarray(label) for label in labels])
-    return imgs, labels
+    
+    # Create feature skew augmentations 
+    # TODO: check that these four distributions are equally different from each other?
+    imgs_rot = jnp.rot90(imgs, k=2, axes=(1,2))
+    imgs_inv = 1-imgs
+    imgs_inv_rot = jnp.rot90(1-imgs, k=2, axes=(1,2))
+    all_augs = jnp.stack([imgs, imgs_rot, imgs_inv, imgs_inv_rot], axis=0)
+    # Create n heterogeneous skews by randomly summing the four augmentations, while equally representing them globally
+    proportions = jax.random.uniform(key, (n,4))
+    proportions /= jnp.sum(proportions, axis=0, keepdims=True)
+    proportions = proportions[...,None,None,None,None]
+    clients_imgs = all_augs*proportions
+    clients_imgs = clients_imgs.sum(axis=1)
+    # Scale to [0,1] because we lost that guarantee
+    clients_imgs = (clients_imgs - clients_imgs.min(axis=0)) / (clients_imgs.max(axis=0) - clients_imgs.min(axis=0))
+    # Share samples between the fully heterogeneous clients according to the provided beta
+    mix_frac = int(feature_beta*clients_imgs.shape[1])
+    mix_idx = jax.random.choice(key, jnp.arange(clients_imgs.shape[1]), (mix_frac,), replace=False)
+    mix_idx_inv = jnp.isin(jnp.arange(clients_imgs.shape[1]), mix_idx, invert=True)
+    mix_samples = jnp.tile(clients_imgs[:, mix_idx].reshape(-1, *clients_imgs.shape[2:]), (n,1,1,1,1))
+    clients_imgs = jnp.concat([mix_samples, clients_imgs[:, mix_idx_inv]], axis=1)
+    # Broadcast labels
+    labels = jnp.tile(labels, (n,1,1))
+    mix_labels = jnp.tile(labels[:,mix_idx], (1,n,1))
+    labels = jnp.concat([mix_labels, labels[:,mix_idx_inv]], axis=1)
+    return clients_imgs, labels
 
-create_imagenet = lambda *args, **kwargs: DataLoader(Imagenet(*args, **kwargs), batch_size=64, shuffle=True, collate_fn=jax_collate)
+def create_imagenet(path, n, key, feature_beta, label_beta, sample_overlap, batch_size, **kwargs):
+    # TODO: batch size should be recalculated
+    return DataLoader(
+        Imagenet(path),
+        batch_size=batch_size,
+        collate_fn=partial(jax_collate, n=n, key=key, feature_beta=feature_beta, label_beta=label_beta, sample_overlap=sample_overlap),
+        **kwargs
+    )
