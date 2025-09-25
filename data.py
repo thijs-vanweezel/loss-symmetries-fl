@@ -79,20 +79,16 @@ def jax_collate(batch, n, key, feature_beta, label_beta, sample_overlap):
     imgs_inv = 255.-imgs
     imgs_inv_rot = jnp.rot90(255.-imgs, k=2, axes=(1,2))
     all_augs = jnp.stack([imgs, imgs_rot, imgs_inv, imgs_inv_rot], axis=0)
-    globals()["all_augs"] = all_augs  # for debugging   
-    # Give each client a unique distribution by randomly summing the four augmentations (while globally equally representing each augmentation)
+    # Give each client a unique distribution by uniquely summing the four augmentations (while globally equally representing each augmentation)
     weights = jax.vmap(jnp.roll, in_axes=(0,0,None))(jnp.tile(jnp.linspace(0,1,n), (4, 1)), jnp.arange(4), None).T
     weights = weights[...,None,None,None,None]
-    globals()["weights"] = weights  # for debugging
     clients_imgs = all_augs*weights
     clients_imgs = clients_imgs.sum(axis=1)
     # Scale to [0,1] because we lost that guarantee
     clients_imgs = (clients_imgs - clients_imgs.min(axis=0)) / (clients_imgs.max(axis=0) - clients_imgs.min(axis=0))
-    globals()["clients_imgs"] = clients_imgs  # for debugging
     # Share samples between the fully heterogeneous clients according to the provided beta
     mix_frac = int(feature_beta*clients_imgs.shape[1])
     mix_idx = jax.random.choice(key, jnp.arange(clients_imgs.shape[1]), (mix_frac,), replace=False)
-    print("mix_idx", mix_idx)
     mix_idx_inv = jnp.isin(jnp.arange(clients_imgs.shape[1]), mix_idx, invert=True)
     mix_samples = jnp.tile(clients_imgs[:, mix_idx].reshape(-1, *clients_imgs.shape[2:]), (n,1,1,1,1))
     clients_imgs = jnp.concat([mix_samples, clients_imgs[:, mix_idx_inv]], axis=1)
@@ -103,7 +99,7 @@ def jax_collate(batch, n, key, feature_beta, label_beta, sample_overlap):
     return clients_imgs, labels
 
 def create_imagenet(path="./data/Data/CLS-LOC/train", n=4, key=jax.random.key(42), feature_beta=0., label_beta=0., sample_overlap=1., batch_size=40, **kwargs):
-    # TODO: batch size should be recalculated
+    # TODO: batch size should be recalculated or would that extend epoch length too much?
     return DataLoader(
         Imagenet(path),
         batch_size=batch_size,
