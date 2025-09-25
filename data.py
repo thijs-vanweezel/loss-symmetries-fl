@@ -54,10 +54,6 @@ class Imagenet(Dataset):
     def __getitem__(self, idx):
         fp = self.paths[idx]
         img = torchvision.io.read_image(fp).float()
-        if img.shape[1]<128 or img.shape[2]<128 or img.shape[0]!=3:
-            del self.paths[idx] # TODO: affects length of dataset
-            os.remove(fp)
-            return self.__getitem__(idx)
         label = self.classes.index(fp.split("/")[-2].rstrip(".JPEG"))
         label = torch.eye(1000)[label].float()
         return img, label
