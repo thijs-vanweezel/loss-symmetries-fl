@@ -3,13 +3,15 @@ from functools import reduce
 from npy_append_array import NpyAppendArray
 from jax import numpy as jnp
 from flax import nnx
+from functools import partial
 
-# Parallelized train step
-def return_train_step(ell):
+# Parallelized train step (DOES NOT assumes scaled loss for numerical stability with float16)
+def return_train_step(ell, train=True):
     @nnx.jit
     @nnx.vmap(in_axes=(0,None,0,0,0))
     def train_step(model, model_g, opt, x_batch, y_batch):
-        (loss, (prox, ce)), grads = nnx.value_and_grad(ell, has_aux=True)(model, model_g, x_batch, y_batch)
+        (loss, (prox, ce)), grads = nnx.value_and_grad(partial(ell, train=train), has_aux=True)(model, model_g, x_batch, y_batch)
+        # grads = jax.tree.map(lambda g: g/2**15, grads)
         opt.update(grads)
         return loss
     return train_step
@@ -40,15 +42,15 @@ def train(Model, opt, ds_train, ds_val, ell, local_epochs, filename=None, n=4, m
     models = nnx.vmap(Model)(keys)
     # Ditto for optimizers
     opts = nnx.vmap(opt)(models)
-    train_step = return_train_step(ell)
+    train_step = return_train_step(ell, train=True)
     # Init and save
     params, struct = jax.tree.flatten(nnx.to_tree(models))
     model_g = nnx.from_tree(jax.tree.unflatten(struct, jax.tree.map(lambda x: jnp.mean(x, axis=0), params)))
     # Adjust loss function so that it can be used as stand-alone
-    ell_val = nnx.jit(nnx.vmap(ell, in_axes=(0,None,0,0)))
+    ell_val = nnx.jit(nnx.vmap(return_train_step(ell, train=False), in_axes=(0,None,0,0)))
 
     # Communication rounds
-    losses = jnp.zeros((0,n+1))
+    losses = jnp.zeros((0,n+1)) # last column for validation loss
     r = 0
     patience = 1
     while r<=(1-(0 if max_patience else 1)) or patience<=(max_patience or -1):
@@ -61,7 +63,11 @@ def train(Model, opt, ds_train, ds_val, ell, local_epochs, filename=None, n=4, m
                     f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(nnx.to_tree(models))], axis=1))
             # Iterate over batches
             for b, (x_batch, y_batch) in enumerate(ds_train):
-                losses = losses.at[-1,:-1].set(losses[-1,:-1] + train_step(models, model_g, opts, x_batch, y_batch))
+                loss = train_step(models, model_g, opts, x_batch, y_batch)
+                if jnp.isnan(loss).any():
+                    print(losses)
+                    raise ValueError("NaN encountered")
+                losses = losses.at[-1,:-1].set(losses[-1,:-1] + loss)
         # Aggregate and evaluate
         updates = get_updates(model_g, models)
         model_g, models = aggregate(model_g, updates, n)
