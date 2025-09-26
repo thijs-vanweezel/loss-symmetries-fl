@@ -53,21 +53,21 @@ class Imagenet(Dataset):
 
     def __getitem__(self, idx):
         fp = self.paths[idx]
-        img = torchvision.io.read_image(fp).float()
+        img = torchvision.io.read_image(fp)
         label = self.classes.index(fp.split("/")[-2].rstrip(".JPEG"))
-        label = torch.eye(1000)[label].float()
+        label = torch.eye(1000)[label]
         return img, label
 
 def jax_collate(batch, n, key, feature_beta, label_beta, sample_overlap):
     imgs, labels = zip(*batch)
     # Find minimum height and width in this batch
-    min_height = min(img.shape[1] for img in imgs)
-    min_width = min(img.shape[2] for img in imgs)
+    min_height = 128 #min(img.shape[1] for img in imgs)
+    min_width = 128 #min(img.shape[2] for img in imgs)
     # Resize images to the minimum height and width
     imgs = [torchvision.transforms.functional.resize(img, (min_height, min_width)) for img in imgs]
     # Convert and concat
-    imgs = jnp.swapaxes(jnp.stack([jnp.asarray(img) for img in imgs]), 1, -1) # HWC
-    labels = jnp.stack([jnp.asarray(label) for label in labels])
+    imgs = jnp.swapaxes(jnp.stack([jnp.asarray(img, dtype=jnp.bfloat16) for img in imgs]), 1, -1) # HWC
+    labels = jnp.stack([jnp.asarray(label, dtype=jnp.float32) for label in labels])
     
     # Create feature skew augmentations 
     # TODO: check that these four distributions are equally different from each other?
@@ -75,12 +75,12 @@ def jax_collate(batch, n, key, feature_beta, label_beta, sample_overlap):
     imgs_inv = 255.-imgs
     imgs_inv_rot = jnp.rot90(255.-imgs, k=2, axes=(1,2))
     all_augs = jnp.stack([imgs, imgs_rot, imgs_inv, imgs_inv_rot], axis=0)
-    # Give each client a unique distribution by uniquely summing the four augmentations (while globally equally representing each augmentation)
-    weights = jax.vmap(jnp.roll, in_axes=(0,0,None))(jnp.tile(jnp.linspace(0,1,n), (4, 1)), jnp.arange(4), None).T
+    # Give each client a unique composite augmentations (while globally representing all four augmentation equally)
+    weights = jax.vmap(jnp.roll, in_axes=(0,0,None))(jnp.tile(jnp.linspace(0,1,n, dtype=jnp.bfloat16), (4, 1)), jnp.arange(4), None).T
     weights = weights[...,None,None,None,None]
     clients_imgs = all_augs*weights
     clients_imgs = clients_imgs.sum(axis=1)
-    # Scale to [0,1] because we lost that guarantee
+    # Scale to [0,1] because we lost that guarantee 
     clients_imgs = (clients_imgs - clients_imgs.min(axis=0)) / (clients_imgs.max(axis=0) - clients_imgs.min(axis=0))
     # Share samples between the fully heterogeneous clients according to the provided beta
     mix_frac = int(feature_beta*clients_imgs.shape[1])
