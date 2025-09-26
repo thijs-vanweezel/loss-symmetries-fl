@@ -48,19 +48,23 @@ class ResNetBlock(nnx.Module):
             kernel_size=(3,3),
             strides=(stride,stride),
             padding="SAME",
-            rngs=key
+            rngs=key,
+            param_dtype=jnp.bfloat16,
+            dtype=jnp.bfloat16
         )
-        self.norm1 = nnx.BatchNorm(out_kernels, rngs=key)
+        self.norm1 = nnx.BatchNorm(out_kernels, rngs=key, param_dtype=jnp.float32, dtype=jnp.bfloat16)
         self.conv2 = nnx.Conv(
             in_features=out_kernels,
             out_features=out_kernels,
             kernel_size=(3,3),
             padding="SAME",
-            rngs=key
+            rngs=key,
+            param_dtype=jnp.bfloat16,
+            dtype=jnp.bfloat16
         )
-        self.norm2 = nnx.BatchNorm(out_kernels, rngs=key)
+        self.norm2 = nnx.BatchNorm(out_kernels, rngs=key, param_dtype=jnp.float32, dtype=jnp.bfloat16)
         if stride>1 and in_kernels!=out_kernels:
-            self.id_conv = nnx.Conv(in_kernels, out_kernels, kernel_size=(1,1), strides=(stride, stride), rngs=key)
+            self.id_conv = nnx.Conv(in_kernels, out_kernels, kernel_size=(1,1), strides=(stride, stride), rngs=key, dtype=jnp.bfloat16, param_dtype=jnp.bfloat16)
 
     def __call__(self, x, train=True):
         res = x if self.stride==1 else self.id_conv(x)
@@ -76,7 +80,7 @@ class ResNetBlock(nnx.Module):
 class ResNet(nnx.Module):
     def __init__(self, key:nnx.RngKey, block=ResNetBlock, layers=[3,4,6,3], kernels=[64,128,256,512], num_classes=1000, **kwargs):
         super().__init__(**kwargs)
-        self.conv = nnx.Conv(3, 64, kernel_size=(7,7), strides=(2,2), padding="SAME", rngs=key)
+        self.conv = nnx.Conv(3, 64, kernel_size=(7,7), strides=(2,2), padding="SAME", rngs=key, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
         self.layers = []
         for j, l in enumerate(layers):
             for i in range(l):
@@ -84,7 +88,7 @@ class ResNet(nnx.Module):
                 k_out = kernels[j]
                 s = 2 if i==0 and j>0 else 1
                 self.layers.append(block(key, k_in, k_out, stride=s))
-        self.fc = nnx.Linear(kernels[-1], num_classes, rngs=key)
+        self.fc = nnx.Linear(kernels[-1], num_classes, rngs=key, param_dtype=jnp.bfloat16, dtype=jnp.float32)
 
     def __call__(self, x, train=True):
         x = self.conv(x)
