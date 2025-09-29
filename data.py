@@ -40,6 +40,23 @@ def create_digits(beta, batch_size=64, n_clients=4, client_overlap=1.):
     y_train = jnp.swapaxes(y_train[:excess].reshape(num_batches, batch_size, n_clients, -1), 1, 2)
     return x_train, y_train, x_val, y_val, x_test, y_test
 
+def elastic_deform(image:jnp.ndarray, freq:int, ampl:int=10, phase:int=0, axis:int=0):
+    """
+    Applies elastic deformation using a sinusoid of fixed magnitude to an image.
+    Args:
+        image: The input image to be distorted.
+        freq: Frequency of the sinusoidal distortion. Low frequency are less impactful to convolution.
+        ampl: Amplitude of the distortion. Higher amplitude displaces more pixels.
+        phase: Phase shift of the sinusoid. Can be used to differentiate otherwise identical distortions. TODO: but does it actually differentiate the distributions?
+        axis: Determines whether to apply the distortion along the width or height of the image.
+    """
+    # TODO: shift along an angle instead of along an axis, which also differentiates identical distortions
+    # Let the shifts represent one period of a sinusoid with given frequency over the axis of the image
+    shifts = ampl*jnp.sin(jnp.linspace(phase, 2*jnp.pi*freq+phase, image.shape[axis]))
+    # Apply the shifts to each row of the image
+    distorted_image = jax.vmap(jnp.roll, in_axes=(axis,0,None), out_axes=axis)(image, shifts.astype(jnp.int32), 0)
+    return distorted_image
+
 class Imagenet(Dataset):
     def __init__(self, data_path):
         random.seed(42)
@@ -69,29 +86,12 @@ def jax_collate(batch, n, key, feature_beta, label_beta, sample_overlap):
     imgs = jnp.swapaxes(jnp.stack([jnp.asarray(img, dtype=jnp.bfloat16) for img in imgs]), 1, -1) # HWC
     labels = jnp.stack([jnp.asarray(label, dtype=jnp.float32) for label in labels])
     
-    # Create feature skew augmentations 
-    # TODO: check that these four distributions are equally different from each other?
-    imgs_rot = jnp.rot90(imgs, k=2, axes=(1,2))
-    imgs_inv = 255.-imgs
-    imgs_inv_rot = jnp.rot90(255.-imgs, k=2, axes=(1,2))
-    all_augs = jnp.stack([imgs, imgs_rot, imgs_inv, imgs_inv_rot], axis=0)
-    # Give each client a unique composite augmentations (while globally representing all four augmentation equally)
-    weights = jax.vmap(jnp.roll, in_axes=(0,0,None))(jnp.tile(jnp.linspace(0,1,n, dtype=jnp.bfloat16), (4, 1)), jnp.arange(4), None).T
-    weights = weights[...,None,None,None,None]
-    clients_imgs = all_augs*weights
-    clients_imgs = clients_imgs.sum(axis=1)
-    # Scale to [0,1] because we lost that guarantee 
-    clients_imgs = (clients_imgs - clients_imgs.min(axis=0)) / (clients_imgs.max(axis=0) - clients_imgs.min(axis=0))
-    # Share samples between the fully heterogeneous clients according to the provided beta
-    mix_frac = int(feature_beta*clients_imgs.shape[1])
-    mix_idx = jax.random.choice(key, jnp.arange(clients_imgs.shape[1]), (mix_frac,), replace=False)
-    mix_idx_inv = jnp.isin(jnp.arange(clients_imgs.shape[1]), mix_idx, invert=True)
-    mix_samples = jnp.tile(clients_imgs[:, mix_idx].reshape(-1, *clients_imgs.shape[2:]), (n,1,1,1,1))
-    clients_imgs = jnp.concat([mix_samples, clients_imgs[:, mix_idx_inv]], axis=1)
-    # Broadcast labels
-    labels = jnp.tile(labels, (n,1,1))
-    mix_labels = jnp.tile(labels[:,mix_idx], (1,n,1))
-    labels = jnp.concat([mix_labels, labels[:,mix_idx_inv]], axis=1)
+    # Create feature skew with elastic deformation
+    phases = [i*2*jnp.pi/n for i in range(n)]
+    clients_imgs = jnp.stack([
+        jax.vmap(elastic_deform, in_axes=(0, None, None, None, None), out_axes=0)(imgs, 10, feature_beta*min_width, phases[i], 0) 
+    for i in range(n)], axis=1)
+
     return clients_imgs, labels
 
 def create_imagenet(path="./data/Data/CLS-LOC/train", n=4, key=jax.random.key(42), feature_beta=0., label_beta=0., sample_overlap=1., batch_size=40, **kwargs):
