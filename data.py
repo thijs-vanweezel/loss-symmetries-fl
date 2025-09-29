@@ -1,6 +1,6 @@
 from scipy.ndimage import rotate
 from sklearn.datasets import load_digits
-import jax, os, torchvision, torch, random
+import jax, os, torchvision, torch, random, numpy as np, cv2
 from torch.utils.data import Dataset, DataLoader, default_collate
 from jax import numpy as jnp
 from functools import partial
@@ -40,22 +40,19 @@ def create_digits(beta, batch_size=64, n_clients=4, client_overlap=1.):
     y_train = jnp.swapaxes(y_train[:excess].reshape(num_batches, batch_size, n_clients, -1), 1, 2)
     return x_train, y_train, x_val, y_val, x_test, y_test
 
-def elastic_deform(image:jnp.ndarray, freq:int, ampl:int=10, phase:int=0, axis:int=0):
-    """
-    Applies elastic deformation using a sinusoid of fixed magnitude to an image.
-    Args:
-        image: The input image to be distorted.
-        freq: Frequency of the sinusoidal distortion. Low frequency are less impactful to convolution.
-        ampl: Amplitude of the distortion. Higher amplitude displaces more pixels.
-        phase: Phase shift of the sinusoid. Can be used to differentiate otherwise identical distortions. TODO: but does it actually differentiate the distributions?
-        axis: Determines whether to apply the distortion along the width or height of the image.
-    """
-    # TODO: shift along an angle instead of along an axis, which also differentiates identical distortions
-    # Let the shifts represent one period of a sinusoid with given frequency over the axis of the image
-    shifts = ampl*jnp.sin(jnp.linspace(phase, 2*jnp.pi*freq+phase, image.shape[axis]))
-    # Apply the shifts to each row of the image
-    distorted_image = jax.vmap(jnp.roll, in_axes=(axis,0,None), out_axes=axis)(image, shifts.astype(jnp.int32), 0)
-    return distorted_image
+def perspective_shift(image, angle=0., severity=0.):
+    h, w = image.shape[:2]
+    src_pts = np.array([[0, 0], [w, 0], [0, h], [w, h]], dtype=np.float32)
+    dx = np.cos(angle) * severity * w
+    dy = np.sin(angle) * severity * h
+    dst_pts = np.array([
+        [0 + dx, 0],
+        [w + dx, 0 + dy],
+        [0 - dx, h],
+        [w - dx, h - dy]
+    ])
+    transform = cv2.getPerspectiveTransform(src_pts, dst_pts)
+    return cv2.warpPerspective(image, transform, (w, h))
 
 class Imagenet(Dataset):
     def __init__(self, data_path):
@@ -86,10 +83,12 @@ def jax_collate(batch, n, key, feature_beta, label_beta, sample_overlap):
     imgs = jnp.swapaxes(jnp.stack([jnp.asarray(img, dtype=jnp.bfloat16) for img in imgs]), 1, -1) # HWC
     labels = jnp.stack([jnp.asarray(label, dtype=jnp.float32) for label in labels])
     
+    # Decrease sample overlap
+    
     # Create feature skew with elastic deformation
-    phases = [i*2*jnp.pi/n for i in range(n)]
+    angles = [i*2*jnp.pi/n for i in range(n)]
     clients_imgs = jnp.stack([
-        jax.vmap(elastic_deform, in_axes=(0, None, None, None, None), out_axes=0)(imgs, 10, feature_beta*min_width, phases[i], 0) 
+        jax.vmap(perspective_shift, in_axes=(0, None, None))(imgs, feature_beta, angles[i]) 
     for i in range(n)], axis=1)
 
     return clients_imgs, labels
