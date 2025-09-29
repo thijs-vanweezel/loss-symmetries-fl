@@ -4,6 +4,7 @@ from npy_append_array import NpyAppendArray
 from jax import numpy as jnp
 from flax import nnx
 from functools import partial
+from tqdm.auto import tqdm
 
 # Parallelized train step (DOES NOT assumes scaled loss for numerical stability with float16)
 def return_train_step(ell, train=True):
@@ -62,7 +63,7 @@ def train(Model, opt, ds_train, ds_val, ell, local_epochs, filename=None, n=4, m
                 with NpyAppendArray(filename, delete_if_exists=True if epoch+r==0 else False) as f:
                     f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(nnx.to_tree(models))], axis=1))
             # Iterate over batches
-            for b, (x_batch, y_batch) in enumerate(ds_train):
+            for b, (x_batch, y_batch) in enumerate(tqdm(ds_train, leave=False, desc=f"Round {r} Epoch {epoch}/{local_epochs}")):
                 loss = train_step(models, model_g, opts, x_batch, y_batch)
                 if jnp.isnan(loss).any():
                     print(losses)
