@@ -40,6 +40,7 @@ def create_digits(beta, batch_size=64, n_clients=4, client_overlap=1.):
     y_train = jnp.swapaxes(y_train[:excess].reshape(num_batches, batch_size, n_clients, -1), 1, 2)
     return x_train, y_train, x_val, y_val, x_test, y_test
 
+@np.vectorize(excluded=(1,2), signature="(h,w,c)->(h,w,c)")
 def perspective_shift(image, angle=0., severity=0.):
     h, w = image.shape[:2]
     src_pts = np.array([[0, 0], [w, 0], [0, h], [w, h]], dtype=np.float32)
@@ -50,7 +51,7 @@ def perspective_shift(image, angle=0., severity=0.):
         [w + dx, 0 + dy],
         [0 - dx, h],
         [w - dx, h - dy]
-    ])
+    ], dtype=np.float32)
     transform = cv2.getPerspectiveTransform(src_pts, dst_pts)
     return cv2.warpPerspective(image, transform, (w, h))
 
@@ -67,7 +68,7 @@ class Imagenet(Dataset):
 
     def __getitem__(self, idx):
         fp = self.paths[idx]
-        img = torchvision.io.read_image(fp)
+        img = torchvision.io.read_image(fp).float()/255.
         label = self.classes.index(fp.split("/")[-2].rstrip(".JPEG"))
         label = torch.eye(1000)[label]
         return img, label
@@ -80,21 +81,21 @@ def jax_collate(batch, n, key, feature_beta, label_beta, sample_overlap):
     # Resize images to the minimum height and width
     imgs = [torchvision.transforms.functional.resize(img, (min_height, min_width)) for img in imgs]
     # Convert and concat
-    imgs = jnp.swapaxes(jnp.stack([jnp.asarray(img, dtype=jnp.bfloat16) for img in imgs]), 1, -1) # HWC
+    imgs = np.swapaxes(np.stack([np.asarray(img, dtype=np.float32) for img in imgs]), 1, -1) # HWC
     labels = jnp.stack([jnp.asarray(label, dtype=jnp.float32) for label in labels])
-    
+
     # Decrease sample overlap
     
     # Create feature skew with elastic deformation
-    angles = [i*2*jnp.pi/n for i in range(n)]
+    angles = [i*2*np.pi/n for i in range(n)]
     clients_imgs = jnp.stack([
-        jax.vmap(perspective_shift, in_axes=(0, None, None))(imgs, feature_beta, angles[i]) 
-    for i in range(n)], axis=1)
+        perspective_shift(imgs, feature_beta, angles[i]) 
+    for i in range(n)], axis=0)
 
-    return clients_imgs, labels
+    return clients_imgs, jnp.tile(labels, (n, 1, 1))
 
 def create_imagenet(path="./data/Data/CLS-LOC/train", n=4, key=jax.random.key(42), feature_beta=0., label_beta=0., sample_overlap=1., batch_size=40, **kwargs):
-    # TODO: batch size should be recalculated or would that extend epoch length too much?
+    # TODO: batch size should be recalculated
     return DataLoader(
         Imagenet(path),
         batch_size=batch_size,
