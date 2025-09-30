@@ -1,6 +1,6 @@
 from scipy.ndimage import rotate
 from sklearn.datasets import load_digits
-import jax, os, torchvision, torch, random, numpy as np, cv2
+import jax, os, torchvision, torch, numpy as np, cv2
 from torch.utils.data import Dataset, DataLoader, default_collate
 from jax import numpy as jnp
 from functools import partial
@@ -57,11 +57,10 @@ def perspective_shift(image, angle=0., severity=0.):
 
 class Imagenet(Dataset):
     def __init__(self, data_path):
-        random.seed(42)
+        # Get all image paths and corresponding labels
         g = os.walk(data_path, topdown=True)
         self.classes = next(g)[1]
         self.paths = [os.path.join(dirname, f) for (dirname, _, filenames) in g for f in filenames]
-        random.shuffle(self.paths)
 
     def __len__(self):
         return len(self.paths)
@@ -74,6 +73,12 @@ class Imagenet(Dataset):
         return img, label
 
 def jax_collate(batch, n, key, feature_beta, label_beta, sample_overlap):
+    """
+    Custom collate, necessary for several reasons: 
+    - Images have different sizes, and batches can only contain one shape
+    - To create label skew (label_beta=0 corresponds to homogeneity)
+    ...
+    """
     imgs, labels = zip(*batch)
     # Find minimum height and width in this batch
     min_height = 128 #min(img.shape[1] for img in imgs)
@@ -84,22 +89,38 @@ def jax_collate(batch, n, key, feature_beta, label_beta, sample_overlap):
     imgs = np.swapaxes(np.stack([np.asarray(img, dtype=np.float32) for img in imgs]), 1, -1) # HWC
     labels = jnp.stack([jnp.asarray(label, dtype=jnp.float32) for label in labels])
 
-    # Decrease sample overlap
-    
+    # Create label assignment (assuming 1000 classes)
+    # Fractions derived from ( sha + n * ind = 1 ) and ( ind / (sha + ind) = label_beta )
+    shared_frac = 1/(1+n*label_beta/(1-label_beta))
+    indiv_frac = label_beta/(1-label_beta)*shared_frac
+    # Convert to labels
+    indiv_lab = [jnp.arange(i*1000*indiv_frac, (i+1)*1000*indiv_frac, dtype=jnp.int32) for i in range(n)]
+    shared_lab = jnp.arange(n*1000*indiv_frac, 1000, dtype=jnp.int32)
+    # Fetch corresponding idx in this batch
+    clients_mask = [jnp.isin(labels.argmax(-1), jnp.concat([indiv_lab[i], shared_lab])) for i in range(n)]
+    clients_imgs = [imgs[clients_mask[i]] for i in range(n)]
+    clients_labels = jnp.stack([labels[clients_mask[i]] for i in range(n)], axis=0)
+
+    # Decrease sample overlap (doing this batch-wise better reflects the overlap within the gradient)
+
+
     # Create feature skew with elastic deformation
     angles = [i*2*np.pi/n for i in range(n)]
     clients_imgs = jnp.stack([
-        perspective_shift(imgs, feature_beta, angles[i]) 
+        perspective_shift(clients_imgs[i], feature_beta, angles[i]) 
     for i in range(n)], axis=0)
 
-    return clients_imgs, jnp.tile(labels, (n, 1, 1))
+    return clients_imgs, clients_labels
 
 def create_imagenet(path="./data/Data/CLS-LOC/train", n=4, key=jax.random.key(42), feature_beta=0., label_beta=0., sample_overlap=1., batch_size=40, **kwargs):
     # TODO: batch size should be recalculated
+    assert label_beta==0. or sample_overlap==1., "Sample overlap reduction not implemented for label_beta>0"
+    assert label_beta==0. or batch_size%n==0, "Original batch size must be divisible by n, so that labels can be evenly distributed"
     return DataLoader(
         Imagenet(path),
         batch_size=batch_size,
         collate_fn=partial(jax_collate, n=n, key=key, feature_beta=feature_beta, label_beta=label_beta, sample_overlap=sample_overlap),
+        shuffle=False,
         **kwargs
     )
 
