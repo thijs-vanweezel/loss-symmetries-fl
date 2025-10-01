@@ -99,8 +99,8 @@ def jax_collate(batch, n, feature_beta, indiv_stop, sample_overlap):
     """
     imgs, labels = zip(*batch)
     # Find minimum height and width in this batch
-    min_height = min(img.shape[1] for img in imgs)
-    min_width = min(img.shape[2] for img in imgs)
+    min_height = 128 #min(img.shape[1] for img in imgs)
+    min_width = 128 #min(img.shape[2] for img in imgs)
     # Resize images to the minimum height and width
     imgs = [torchvision.transforms.functional.resize(img, (min_height, min_width)) for img in imgs]
     # Convert and concat
@@ -127,8 +127,8 @@ def create_imagenet(path="./data/Data/CLS-LOC/train", n=4, feature_beta=0., labe
     assert label_beta==0. or sample_overlap==1., "Sample overlap reduction not implemented for label_beta>0"
     assert label_beta==0. or batch_size%n==0, "Original batch size must be divisible by n, so that labels can be evenly distributed"
     # Label skew fractions derived from ( sha + n * ind = 1 ) and ( ind / (sha + ind) = label_beta )
-    shared_frac = 1/(1+n*label_beta/(1-label_beta))
-    indiv_frac = label_beta/(1-label_beta)*shared_frac
+    shared_frac = 0. if np.allclose(label_beta, 1.) else 1/(1+n*label_beta/(1-label_beta)) # numerical stability
+    indiv_frac = 1. if np.allclose(label_beta, 1.) else label_beta/(1-label_beta)*shared_frac
     # Create label assignment (assuming 1000 classes)
     indiv_lab = [jnp.arange(i*int(1000*indiv_frac), (i+1)*int(1000*indiv_frac)) for i in range(n)]
     shared_lab = jnp.arange(n*int(1000*indiv_frac), 1000)
