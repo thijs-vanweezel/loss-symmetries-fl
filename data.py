@@ -63,6 +63,7 @@ class Imagenet(Dataset):
         classesbyclient = {c: [self.classes[i] for i in indiv_lab[c]] for c in range(n)}
         sharedclasses = [self.classes[i] for i in shared_lab]
         paths = [os.path.join(dirname, f) for (dirname, _, filenames) in g for f in filenames]
+        paths = [x for _, x in sorted(enumerate(paths), key=lambda x: x[0]%598)] # shuffle with knowledge of fixed number of samples per class
         self.pathsbyclient = {client: [file for file in paths if file.rsplit("/")[-2] in classesbyclient[client]] for client in range(n)}
         self.sharedpaths = [file for file in paths if file.rsplit("/")[-2] in sharedclasses]
         self.n = n
@@ -70,7 +71,7 @@ class Imagenet(Dataset):
         self.frac = len(indiv_lab[0])/len(self.classes)
 
     def __len__(self):
-        return min(len(v) for v in self.pathsbyclient.values())*self.n
+        return min(len(v) for v in self.pathsbyclient.values())*self.n + len(self.sharedpaths)
 
     def __getitem__(self, idx):
         # If the sample index within this batch is less than the required number of individual samples
@@ -117,7 +118,7 @@ def jax_collate(batch, n, feature_beta, indiv_stop, sample_overlap):
     # Create feature skew with elastic deformation
     angles = [i*2*np.pi/n for i in range(n)]
     clients_imgs = jnp.stack([
-        perspective_shift(clients_imgs[i], feature_beta, angles[i]) 
+        perspective_shift(clients_imgs[i], angles[i], feature_beta) 
     for i in range(n)], axis=0)
 
     return clients_imgs, clients_labels
@@ -133,7 +134,7 @@ def create_imagenet(path="./data/Data/CLS-LOC/train", n=4, feature_beta=0., labe
     shared_lab = jnp.arange(n*int(1000*indiv_frac), 1000)
     # Recalculate batch size
     batch_size = batch_size / (shared_frac + indiv_frac)
-    batch_size = int(batch_size - batch_size%n)
+    batch_size = int(batch_size - batch_size%n) # TODO: resulting batch is not 64
     return DataLoader(
         Imagenet(path, indiv_lab, shared_lab, batch_size, n),
         batch_size=batch_size,
