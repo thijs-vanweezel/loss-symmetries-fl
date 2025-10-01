@@ -76,9 +76,9 @@ class ResNetBlock(nnx.Module):
         x = res+x
         return x
 
-# Resnet-34 for ImageNet
+# Resnet for ImageNet ([3,4,6,3] for 34 layers, [2,2,2,2] for 18 layers)
 class ResNet(nnx.Module):
-    def __init__(self, key:nnx.RngKey, block=ResNetBlock, layers=[3,4,6,3], kernels=[64,128,256,512], num_classes=1000, **kwargs):
+    def __init__(self, key:nnx.RngKey, block=ResNetBlock, layers=[2,2,2,2], kernels=[64,128,256,512], num_classes=1000, **kwargs):
         super().__init__(**kwargs)
         self.conv = nnx.Conv(3, 64, kernel_size=(7,7), strides=(2,2), padding="SAME", rngs=key, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
         self.layers = []
