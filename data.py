@@ -90,7 +90,7 @@ class Imagenet(Dataset):
         label = torch.eye(len(self.classes))[label]
         return img, label
 
-def jax_collate(batch, n, feature_beta, indiv_stop, sample_overlap):
+def jax_collate(batch, n, feature_beta, indiv_stop, indiv_frac):
     """
     Custom collate, necessary for several reasons: 
     - Images have different sizes, and batches can only contain one shape
@@ -109,11 +109,16 @@ def jax_collate(batch, n, feature_beta, indiv_stop, sample_overlap):
 
     # Fetch corresponding idx in this batch
     indiv_stop = int(indiv_stop - indiv_stop%n)
-    clients_idxs = [list(range(i, indiv_stop, n))+list(range(indiv_stop, len(imgs))) for i in range(n)]
+    clients_idxs = [list(range(i, indiv_stop, n)) + list(range(indiv_stop, len(imgs))) for i in range(n)]
     clients_imgs = [imgs[clients_idxs[i]] for i in range(n)]
     clients_labels = jnp.stack([labels[jnp.asarray(clients_idxs[i])] for i in range(n)], axis=0)
 
-    # Decrease sample overlap (doing this batch-wise better reflects the overlap within the gradient)
+    # Decrease sample overlap (doing this batch-wise better reflects the overlap within the gradient) NOTE: overwrites label skew
+    if indiv_stop==0:
+        n_per_client = int(indiv_frac * len(imgs))
+        clients_idxs = [list(range(i*n_per_client, (i+1)*n_per_client)) + list(range(n*n_per_client, len(imgs))) for i in range(n)]
+        clients_imgs = [imgs[clients_idxs[i]] for i in range(n)]
+        clients_labels = jnp.stack([labels[jnp.asarray(clients_idxs[i])] for i in range(n)], axis=0)
 
     # Create feature skew with elastic deformation
     angles = [i*2*np.pi/n for i in range(n)]
@@ -124,21 +129,24 @@ def jax_collate(batch, n, feature_beta, indiv_stop, sample_overlap):
     return clients_imgs, clients_labels
 
 def create_imagenet(path="./data/Data/CLS-LOC/train", n=4, feature_beta=0., label_beta=0., sample_overlap=1., batch_size=64, **kwargs):
-    assert label_beta==0. or sample_overlap==1., "Sample overlap reduction not implemented for label_beta>0"
+    assert label_beta==0. or sample_overlap==1., "Sample overlap reduction not implemented for label_beta>0 because they are codependent"
     assert label_beta==0. or batch_size%n==0, "Original batch size must be divisible by n, so that labels can be evenly distributed"
     # Label skew fractions derived from ( sha + n * ind = 1 ) and ( ind / (sha + ind) = label_beta )
-    shared_frac = 0. if np.allclose(label_beta, 1.) else 1/(1+n*label_beta/(1-label_beta)) # numerical stability
-    indiv_frac = 1. if np.allclose(label_beta, 1.) else label_beta/(1-label_beta)*shared_frac
+    shared_frac = 0. if np.allclose(label_beta, 1.) else 1 / (1+(1-label_beta)/label_beta*n) # numerical stability
+    indiv_frac = 1. if np.allclose(label_beta, 1.) else 1 / (label_beta/(1-label_beta)+n) #label_beta/(1-label_beta)*shared_frac
     # Create label assignment (assuming 1000 classes)
     indiv_lab = [jnp.arange(i*int(1000*indiv_frac), (i+1)*int(1000*indiv_frac)) for i in range(n)]
     shared_lab = jnp.arange(n*int(1000*indiv_frac), 1000)
-    # Recalculate batch size
+    # Recalculate batch size (derived from: new_batch_size * indiv_frac + new_batch_size * shared_frac = batch_size)
+    if sample_overlap < 1.: # thus only applies if label_beta=0
+        indiv_frac = 1 / (sample_overlap/(1-sample_overlap)+n)
+        shared_frac = 1 / (1+(1-sample_overlap)/sample_overlap*n)
     batch_size = batch_size / (shared_frac + indiv_frac)
-    batch_size = int(batch_size - batch_size%n) # TODO: resulting batch is not 64
+    batch_size = int(batch_size - batch_size%n) # TODO: resulting batch is not 64, shouldn't we divide by batch_size or smth
     return DataLoader(
         Imagenet(path, indiv_lab, shared_lab, batch_size, n),
         batch_size=batch_size,
-        collate_fn=partial(jax_collate, n=n, feature_beta=feature_beta, indiv_stop=len(indiv_lab[0])/1000*batch_size*n, sample_overlap=sample_overlap),
+        collate_fn=partial(jax_collate, n=n, feature_beta=feature_beta, indiv_stop=len(indiv_lab[0])/1000*batch_size*n, indiv_frac=indiv_frac),
         shuffle=False,
         **kwargs
     )
