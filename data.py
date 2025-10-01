@@ -99,8 +99,8 @@ def jax_collate(batch, n, feature_beta, indiv_stop, sample_overlap):
     """
     imgs, labels = zip(*batch)
     # Find minimum height and width in this batch
-    min_height = 128 #min(img.shape[1] for img in imgs)
-    min_width = 128 #min(img.shape[2] for img in imgs)
+    min_height = min(img.shape[1] for img in imgs)
+    min_width = min(img.shape[2] for img in imgs)
     # Resize images to the minimum height and width
     imgs = [torchvision.transforms.functional.resize(img, (min_height, min_width)) for img in imgs]
     # Convert and concat
