@@ -1,7 +1,7 @@
 from scipy.ndimage import rotate
 from scipy.io import loadmat
 from sklearn.datasets import load_digits
-import jax, os, torchvision, torch, numpy as np, cv2
+import jax, os, torchvision, torch, numpy as np, cv2, shutil
 from torch.utils.data import Dataset, DataLoader, default_collate
 from jax import numpy as jnp
 from functools import partial
@@ -155,7 +155,7 @@ def create_imagenet(path="./data/Data/CLS-LOC/train", n=4, feature_beta=0., labe
 class_name = lambda ds, y: {class_name: name for line in open("data/mapping.txt").read().splitlines() for class_name, name in [line.split(" ", 1)]}[ds.dataset.classes[y.argmax()]]
 
 class MPIIGaze(Dataset):
-    def __init__(self, path:str, n_clients:int, partition:str):
+    def __init__(self, path:str, n_clients:int):
         self.n_clients = n_clients
         g = os.walk(path)
         self.clients = next(g)[1][:n_clients]
@@ -235,9 +235,23 @@ def get_gaze(skew:str=None, batch_size=128, n_clients=4, beta:float=None, path="
     new_batch_size = n_indiv*n_clients + n_shared
     indiv_frac = n_indiv / new_batch_size
     return DataLoader(
-        MPIIGaze(n_clients=n_clients, path=path, partition=partition),
+        MPIIGaze(n_clients=n_clients, path=os.path.join(path, partition)),
         batch_size=new_batch_size,
         collate_fn=partial(jax_collate, n_clients=n_clients, indiv_frac=indiv_frac, skew=skew),
         shuffle=False,
         **kwargs
     )
+
+def preprocess(original_path="MPIIGaze/MPIIGaze/Data/Normalized"):
+    """Run once. Split the MPIIGaze dataset into train/val/test sets."""
+    fps = os.listdir(original_path)
+    os.makedirs(f"{original_path}/train", exist_ok=True)
+    os.makedirs(f"{original_path}/val", exist_ok=True)
+    os.makedirs(f"{original_path}/test", exist_ok=True)
+    for i, person in enumerate(fps):
+        if i < 3:
+            shutil.move(os.path.join(original_path, person), os.path.join(f"{original_path}/val", person))
+        elif i < 6:
+            shutil.move(os.path.join(original_path, person), os.path.join(f"{original_path}/test", person))
+        else:
+            shutil.move(os.path.join(original_path, person), os.path.join(f"{original_path}/train", person))
