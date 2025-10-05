@@ -78,9 +78,9 @@ class ResNetBlock(nnx.Module):
 
 # Resnet for ImageNet ([3,4,6,3] for 34 layers, [2,2,2,2] for 18 layers)
 class ResNet(nnx.Module):
-    def __init__(self, key:nnx.RngKey, block=ResNetBlock, layers=[2,2,2,2], kernels=[64,128,256,512], num_classes=1000, **kwargs):
+    def __init__(self, key:nnx.RngKey, block=ResNetBlock, layers=[2,2,2,2], kernels=[64,128,256,512], channels_in=1, dim_out=2, **kwargs):
         super().__init__(**kwargs)
-        self.conv = nnx.Conv(3, 64, kernel_size=(7,7), strides=(2,2), padding="SAME", rngs=key, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
+        self.conv = nnx.Conv(channels_in, 64, kernel_size=(7,7), strides=(2,2), padding="SAME", rngs=key, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
         self.layers = []
         for j, l in enumerate(layers):
             for i in range(l):
@@ -88,14 +88,19 @@ class ResNet(nnx.Module):
                 k_out = kernels[j]
                 s = 2 if i==0 and j>0 else 1
                 self.layers.append(block(key, k_in, k_out, stride=s))
-        self.fc = nnx.Linear(kernels[-1], num_classes, rngs=key, param_dtype=jnp.bfloat16, dtype=jnp.float32)
+        self.fc = nnx.Linear(kernels[-1]+3, dim_out, rngs=key, param_dtype=jnp.bfloat16, dtype=jnp.float32)
 
-    def __call__(self, x, train=True):
+    def __call__(self, z, x, train=True):
+        print(x.shape, z.shape)
         x = self.conv(x)
+        print(x.shape)
         x = nnx.relu(x)
         x = nnx.max_pool(x, window_shape=(3,3), strides=(2,2), padding="SAME")
+        print(x.shape)
         for layer in self.layers:
             x = layer(x, train=train)
+            print(x.shape)
         x = jnp.mean(x, axis=(1,2))
-        x = self.fc(x)
+        print(x.shape)
+        x = self.fc(jnp.concatenate([x, z], axis=-1))
         return x

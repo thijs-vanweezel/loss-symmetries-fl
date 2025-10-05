@@ -6,13 +6,13 @@ from flax import nnx
 from functools import partial
 from tqdm.auto import tqdm
 
-# Parallelized train step (DOES NOT assumes scaled loss for numerical stability with float16)
+# Parallelized train step
 def return_train_step(ell, train=True):
     @nnx.jit
-    @nnx.vmap(in_axes=(0,None,0,0,0))
-    def train_step(model, model_g, opt, x_batch, y_batch):
-        (loss, (prox, ce)), grads = nnx.value_and_grad(partial(ell, train=train), has_aux=True)(model, model_g, x_batch, y_batch)
-        # grads = jax.tree.map(lambda g: g/2**15, grads)
+    @nnx.vmap(in_axes=(0,None,0,0,0,0))
+    def train_step(model, model_g, opt, z_batch, x_batch, y_batch):
+        (loss, (prox, ce)), grads = nnx.value_and_grad(partial(ell, train=train), has_aux=True)(model, model_g, z_batch, x_batch, y_batch)
+        # grads = jax.tree.map(lambda g: g/2**15, grads) # assumes scaled loss for numerical stability with float16
         opt.update(grads)
         return loss
     return train_step
@@ -63,8 +63,8 @@ def train(Model, opt, ds_train, ds_val, ell, local_epochs, filename=None, n=4, m
                 with NpyAppendArray(filename, delete_if_exists=True if epoch+r==0 else False) as f:
                     f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(nnx.to_tree(models))], axis=1))
             # Iterate over batches
-            for b, (x_batch, y_batch) in enumerate(tqdm(ds_train, leave=False, desc=f"Round {r} Epoch {epoch}/{local_epochs}")):
-                loss = train_step(models, model_g, opts, x_batch, y_batch)
+            for b, (x_batch, z_batch, y_batch) in enumerate(tqdm(ds_train, leave=False, desc=f"Round {r} Epoch {epoch}/{local_epochs}")):
+                loss = train_step(models, model_g, opts, z_batch, x_batch, y_batch)
                 if jnp.isnan(loss).any():
                     print(losses)
                     raise ValueError("NaN encountered")
