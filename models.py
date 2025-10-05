@@ -91,16 +91,11 @@ class ResNet(nnx.Module):
         self.fc = nnx.Linear(kernels[-1]+3, dim_out, rngs=key, param_dtype=jnp.bfloat16, dtype=jnp.float32)
 
     def __call__(self, z, x, train=True):
-        print(x.shape, z.shape)
         x = self.conv(x)
-        print(x.shape)
         x = nnx.relu(x)
         x = nnx.max_pool(x, window_shape=(3,3), strides=(2,2), padding="SAME")
-        print(x.shape)
         for layer in self.layers:
             x = layer(x, train=train)
-            print(x.shape)
         x = jnp.mean(x, axis=(1,2))
-        print(x.shape)
         x = self.fc(jnp.concatenate([x, z], axis=-1))
         return x
