@@ -1,4 +1,5 @@
 from scipy.ndimage import rotate
+from scipy.io import loadmat
 from sklearn.datasets import load_digits
 import jax, os, torchvision, torch, numpy as np, cv2
 from torch.utils.data import Dataset, DataLoader, default_collate
@@ -142,7 +143,7 @@ def create_imagenet(path="./data/Data/CLS-LOC/train", n=4, feature_beta=0., labe
         indiv_frac = 1 / (sample_overlap/(1-sample_overlap)+n)
         shared_frac = 1 / (1+(1-sample_overlap)/sample_overlap*n)
     batch_size = batch_size / (shared_frac + indiv_frac)
-    batch_size = int(batch_size - batch_size%n) # TODO: resulting batch is not 64, shouldn't we divide by batch_size or smth
+    batch_size = int(batch_size - batch_size%n) # TODO: resulting batch is not 64
     return DataLoader(
         Imagenet(path, indiv_lab, shared_lab, batch_size, n),
         batch_size=batch_size,
@@ -152,3 +153,91 @@ def create_imagenet(path="./data/Data/CLS-LOC/train", n=4, feature_beta=0., labe
     )
 
 class_name = lambda ds, y: {class_name: name for line in open("data/mapping.txt").read().splitlines() for class_name, name in [line.split(" ", 1)]}[ds.dataset.classes[y.argmax()]]
+
+class MPIIGaze(Dataset):
+    def __init__(self, path:str, n_clients:int, partition:str):
+        self.n_clients = n_clients
+        g = os.walk(path)
+        self.clients = next(g)[1][:n_clients]
+        self.files = {c: [] for c in self.clients}
+        for (dirname, _, filenames) in g:
+            if os.path.basename(dirname) in self.clients:
+                for f in filenames:
+                    self.files[os.path.basename(dirname)].append(os.path.join(dirname, f))
+
+    def __len__(self):
+        return 213_659//15*self.n_clients # artificial length, simply leads to resampling in clients that do not have as many samples
+
+    def __getitem__(self, idx):
+        client = self.clients[idx%self.n_clients] 
+        day = idx//self.n_clients%len(self.files[client]) # i.e., the how-manyth time this client was seen wrapped around the number of days
+        side = ["left", "right"][idx//(self.n_clients*len(self.files[client]))%2]  # i.e., the how-manyth time this day was seen, wrapped around two sides
+        mat = loadmat(self.files[client][day])["data"][side].item() # TODO: more efficient?
+        i = idx//(self.n_clients*len(self.files[client])*2)%len(mat["pose"].item())
+        aux = torch.asarray(mat["pose"].item()[i])
+        img = torch.unsqueeze(torch.asarray(mat["image"].item()[i])/255., -1) # CHW
+        label = torch.asarray(mat["gaze"].item()[i])
+        label = torch.asarray([torch.arcsin(-label[1]), torch.arctan2(-label[0], -label[2])])
+        return img, aux, label
+    
+def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    """
+    Only one type of skew can be applied at a time, with the following options:
+    - "feature": where indiv_frac==1 corresponds to clients having disjoint (heterogeneous) data distributions.
+    - "overlap": where indiv_frac==0 corresponds to clients having disjoint samples of homogeneous distributions.
+    - "label": where indiv_frac==1 corresponds to clients having disjoint label distributions.
+    """
+    # Collect, convert, and concat
+    auxs, imgs, labels = zip(*batch)
+    auxs = jnp.stack([jnp.asarray(aux, dtype=jnp.float32) for aux in auxs])
+    imgs = jnp.stack([jnp.asarray(img, dtype=jnp.float32) for img in imgs])
+    labels = jnp.stack([jnp.asarray(label, dtype=jnp.float32) for label in labels])
+
+    # Feature skew, by sharing a portion of skewed samples while retaining another portion of client-side samples
+    if skew=="feature":
+        indiv_stop = int(indiv_frac*len(imgs)*n_clients)
+        clients_idxs = [jnp.asarray(list(range(i, indiv_stop, n_clients)) + list(range(indiv_stop, len(imgs)))) for i in range(n_clients)]
+        clients_auxs = [auxs[idxs] for idxs in clients_idxs]
+        clients_imgs = [imgs[idxs] for idxs in clients_idxs]
+        clients_labels = [labels[idxs] for idxs in clients_idxs]
+    
+    # Overlap reduction, by sharing a portion of the total samples while retaining another portion of the total samples
+    elif skew=="overlap":
+        n_indiv = int(indiv_frac*len(imgs))
+        clients_idxs = [jnp.asarray(list(range(i*n_indiv, (i+1)*n_indiv)) + list(range(n_clients*n_indiv, len(imgs)))) for i in range(n_clients)]
+        clients_auxs = [auxs[idxs] for idxs in clients_idxs]
+        clients_imgs = [imgs[idxs] for idxs in clients_idxs]
+        clients_labels = [labels[idxs] for idxs in clients_idxs]
+
+    # Label skew, by evenly dividing the samples into n_clients directional groups, and then sharing a portion of the total samples
+    # Assumes there is no order to the labels' values
+    elif skew=="label":
+        # Sort the non-shared samples by label value
+        indiv_stop = int(indiv_frac*len(imgs)*n_clients)
+        sorted_idxs = jnp.argsort(jnp.arctan2(*labels[:indiv_stop].T))
+        # Divide into n_clients groups
+        group_size = len(sorted_idxs)//n_clients
+        indiv_idxs = [list(sorted_idxs[i*group_size:(i+1)*group_size]) for i in range(n_clients)]
+        shared_idxs = list(range(indiv_stop, len(imgs)))
+        # Select
+        clients_auxs = [auxs[jnp.asarray(idxs + shared_idxs)] for idxs in indiv_idxs]
+        clients_imgs = [imgs[jnp.asarray(idxs + shared_idxs)] for idxs in indiv_idxs]
+        clients_labels = [labels[jnp.asarray(idxs + shared_idxs)] for idxs in indiv_idxs]
+
+    return jnp.stack(clients_auxs, 0), jnp.stack(clients_imgs, 0), jnp.stack(clients_labels, 0)
+
+def get_gaze(skew:str=None, batch_size=128, n_clients=4, beta:float=None, path="MPIIGaze/MPIIGaze/Data/Normalized", partition="train", **kwargs)->DataLoader:
+    assert beta>=0 and beta<=1, "Beta must be between 0 and 1"
+    beta = 1-beta if skew=="overlap" else beta
+    # Fractions derived from ( shared_frac + n_clients * indiv_frac = 1 ) and ( individual / (shared + individual) = beta )
+    n_indiv = int(batch_size*beta)
+    n_shared = batch_size-n_indiv 
+    new_batch_size = n_indiv*n_clients + n_shared
+    indiv_frac = n_indiv / new_batch_size
+    return DataLoader(
+        MPIIGaze(n_clients=n_clients, path=path, partition=partition),
+        batch_size=new_batch_size,
+        collate_fn=partial(jax_collate, n_clients=n_clients, indiv_frac=indiv_frac, skew=skew),
+        shuffle=False,
+        **kwargs
+    )
