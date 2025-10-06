@@ -90,7 +90,7 @@ class ResNet(nnx.Module):
                 self.layers.append(block(key, k_in, k_out, stride=s))
         self.fc = nnx.Linear(kernels[-1]+3, dim_out, rngs=key, param_dtype=jnp.bfloat16, dtype=jnp.float32)
 
-    def __call__(self, z, x, train=True):
+    def __call__(self, x, z, train=True):
         x = self.conv(x)
         x = nnx.relu(x)
         x = nnx.max_pool(x, window_shape=(3,3), strides=(2,2), padding="SAME")
