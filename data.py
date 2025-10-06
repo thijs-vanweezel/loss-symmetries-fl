@@ -223,7 +223,7 @@ def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.nda
 
     return jnp.stack(clients_auxs, 0), jnp.stack(clients_imgs, 0), jnp.stack(clients_labels, 0)
 
-def get_gaze(skew:str=None, batch_size=128, n_clients=4, beta:float=None, path="MPIIGaze_preprocessed", partition="train", **kwargs)->DataLoader:
+def get_gaze(skew:str=None, batch_size=128, n_clients=4, beta:float=0, path="MPIIGaze_preprocessed", partition="train", **kwargs)->DataLoader:
     assert beta>=0 and beta<=1, "Beta must be between 0 and 1"
     beta = 1-beta if skew=="overlap" else beta
     # Fractions derived
@@ -236,6 +236,7 @@ def get_gaze(skew:str=None, batch_size=128, n_clients=4, beta:float=None, path="
         batch_size=new_batch_size,
         collate_fn=partial(jax_collate, n_clients=n_clients, indiv_frac=indiv_frac, skew=skew),
         shuffle=False,
+        drop_last=True,
         **kwargs
     )
 
