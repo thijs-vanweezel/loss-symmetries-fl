@@ -245,13 +245,16 @@ def get_gaze(skew:str=None, batch_size=128, n_clients=4, beta:float=None, path="
 def preprocess(original_path="MPIIGaze/MPIIGaze/Data/Normalized"):
     """Run once. Split the MPIIGaze dataset into train/val/test sets."""
     fps = os.listdir(original_path)
-    os.makedirs(f"{original_path}/train", exist_ok=True)
-    os.makedirs(f"{original_path}/val", exist_ok=True)
-    os.makedirs(f"{original_path}/test", exist_ok=True)
-    for i, person in enumerate(fps):
-        if i < 3:
-            shutil.move(os.path.join(original_path, person), os.path.join(f"{original_path}/val", person))
-        elif i < 6:
-            shutil.move(os.path.join(original_path, person), os.path.join(f"{original_path}/test", person))
-        else:
-            shutil.move(os.path.join(original_path, person), os.path.join(f"{original_path}/train", person))
+    for person in fps:
+        mats = os.listdir(f"{original_path}/{person}/")
+        os.makedirs(f"{original_path}/train/{person}", exist_ok=True)
+        os.makedirs(f"{original_path}/val/{person}", exist_ok=True)
+        os.makedirs(f"{original_path}/test/{person}", exist_ok=True)
+        for i, mat in enumerate(mats):
+            if i < .15*len(mats):
+                shutil.move(f"{original_path}/{person}/{mat}", f"{original_path}/test/{person}/{mat}")
+            elif i < .3*len(mats):
+                shutil.move(f"{original_path}/{person}/{mat}", f"{original_path}/val/{person}/{mat}")
+            else:
+                shutil.move(f"{original_path}/{person}/{mat}", f"{original_path}/train/{person}/{mat}")
+        os.rmdir(f"{original_path}/{person}/")
