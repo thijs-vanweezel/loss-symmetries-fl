@@ -7,11 +7,11 @@ from functools import partial
 from tqdm.auto import tqdm
 
 # Parallelized train step
-def return_train_step(ell, train=True):
+def return_train_step(ell):
     @nnx.jit
     @nnx.vmap(in_axes=(0,None,0,0,0,0))
-    def train_step(model, model_g, opt, z_batch, x_batch, y_batch):
-        (loss, (prox, ce)), grads = nnx.value_and_grad(partial(ell, train=train), has_aux=True)(model, model_g, z_batch, x_batch, y_batch)
+    def train_step(model, model_g, opt, x_batch, z_batch, y_batch):
+        (loss, (prox, ce)), grads = nnx.value_and_grad(partial(ell, train=True), has_aux=True)(model, model_g, x_batch, z_batch, y_batch)
         # grads = jax.tree.map(lambda g: g/2**15, grads) # assumes scaled loss for numerical stability with float16
         opt.update(grads)
         return loss
@@ -43,12 +43,12 @@ def train(Model, opt, ds_train, ds_val, ell, local_epochs, filename=None, n=4, m
     models = nnx.vmap(Model)(keys)
     # Ditto for optimizers
     opts = nnx.vmap(opt)(models)
-    train_step = return_train_step(ell, train=True)
+    train_step = return_train_step(ell)
     # Init and save
     params, struct = jax.tree.flatten(nnx.to_tree(models))
     model_g = nnx.from_tree(jax.tree.unflatten(struct, jax.tree.map(lambda x: jnp.mean(x, axis=0), params)))
     # Adjust loss function so that it can be used as stand-alone
-    ell_val = nnx.jit(nnx.vmap(return_train_step(ell, train=False), in_axes=(0,None,0,0)))
+    ell_val = nnx.jit(nnx.vmap(partial(ell, train=False), in_axes=(0,None,0,0,0)))
 
     # Communication rounds
     losses = jnp.zeros((0,n+1)) # last column for validation loss
@@ -63,20 +63,21 @@ def train(Model, opt, ds_train, ds_val, ell, local_epochs, filename=None, n=4, m
                 with NpyAppendArray(filename, delete_if_exists=True if epoch+r==0 else False) as f:
                     f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(nnx.to_tree(models))], axis=1))
             # Iterate over batches
-            for b, (x_batch, z_batch, y_batch) in enumerate(tqdm(ds_train, leave=False, desc=f"Round {r} Epoch {epoch}/{local_epochs}")):
-                loss = train_step(models, model_g, opts, z_batch, x_batch, y_batch)
+            for b, (x_batch, z_batch, y_batch) in enumerate(tqdm(ds_train, leave=False, desc=f"Round {r} Epoch {epoch}/{local_epochs-1}")):
+                loss = train_step(models, model_g, opts, x_batch, z_batch, y_batch)
                 if jnp.isnan(loss).any():
                     print(losses)
                     raise ValueError("NaN encountered")
                 losses = losses.at[-1,:-1].set(losses[-1,:-1] + loss)
         # Aggregate and evaluate
-        updates = get_updates(model_g, models)
-        model_g, models = aggregate(model_g, updates, n)
         losses = losses.at[-1,:-1].set(losses[-1,:-1]/local_epochs/(b+1))
         val_loss = reduce(lambda a,b: a+ell_val(models, model_g, *b)[0].mean(), ds_val, 0.)
         val_loss /= len(ds_val)
         losses = losses.at[-1, -1].set(val_loss)
         print(f"round {r} global validation loss: {val_loss}")
+        # Aggregate
+        updates = get_updates(model_g, models)
+        model_g, models = aggregate(model_g, updates, n)
         # Check if model is converged
         r += 1
         if r>1 and losses[-1,-1]>losses[-patience-1,-1]:
