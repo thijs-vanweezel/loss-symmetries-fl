@@ -166,17 +166,14 @@ class MPIIGaze(Dataset):
                     self.files[os.path.basename(dirname)].append(os.path.join(dirname, f))
 
     def __len__(self):
-        return 213_659//15*self.n_clients # artificial length, simply leads to resampling in clients that do not have as many samples
+        # artificial length, simply leads to resampling in clients that do not have as many samples
+        # return 213_659//15*self.n_clients 
+        return sum(len(v) for v in self.files.values())//self.n_clients
 
     def __getitem__(self, idx):
         client = self.clients[idx%self.n_clients] 
-        day = idx//self.n_clients%len(self.files[client]) # i.e., the how-manyth time this client was seen wrapped around the number of days
-        side = ["left", "right"][idx//(self.n_clients*len(self.files[client]))%2]  # i.e., the how-manyth time this day was seen, wrapped around two sides
-        mat = loadmat(self.files[client][day])["data"][side].item() # TODO: more efficient?
-        i = idx//(self.n_clients*len(self.files[client])*2)%len(mat["pose"].item())
-        aux = torch.asarray(mat["pose"].item()[i])
-        img = torch.unsqueeze(torch.asarray(mat["image"].item()[i])/255., -1) # CHW
-        label = torch.asarray(mat["gaze"].item()[i])
+        i = idx//self.n_clients%len(self.files[client]) # i.e., the how-manyth time this client was seen wrapped around its number of samples
+        img, label, aux = torch.load(self.files[client][i])
         label = torch.asarray([torch.arcsin(-label[1]), torch.arctan2(-label[0], -label[2])])
         return img, aux, label
     
@@ -226,10 +223,10 @@ def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.nda
 
     return jnp.stack(clients_auxs, 0), jnp.stack(clients_imgs, 0), jnp.stack(clients_labels, 0)
 
-def get_gaze(skew:str=None, batch_size=128, n_clients=4, beta:float=None, path="MPIIGaze/MPIIGaze/Data/Normalized", partition="train", **kwargs)->DataLoader:
+def get_gaze(skew:str=None, batch_size=128, n_clients=4, beta:float=None, path="MPIIGaze_preprocessed", partition="train", **kwargs)->DataLoader:
     assert beta>=0 and beta<=1, "Beta must be between 0 and 1"
     beta = 1-beta if skew=="overlap" else beta
-    # Fractions derived from ( shared_frac + n_clients * indiv_frac = 1 ) and ( individual / (shared + individual) = beta )
+    # Fractions derived
     n_indiv = int(batch_size*beta)
     n_shared = batch_size-n_indiv 
     new_batch_size = n_indiv*n_clients + n_shared
@@ -243,18 +240,32 @@ def get_gaze(skew:str=None, batch_size=128, n_clients=4, beta:float=None, path="
     )
 
 def preprocess(original_path="MPIIGaze/MPIIGaze/Data/Normalized"):
-    """Run once. Split the MPIIGaze dataset into train/val/test sets."""
-    fps = os.listdir(original_path)
+    """Run once."""
+    # Split the MPIIGaze dataset into train/val/test sets.
+    fps = [f for f in os.listdir(original_path) if f.startswith("p")]
     for person in fps:
-        mats = os.listdir(f"{original_path}/{person}/")
-        os.makedirs(f"{original_path}/train/{person}", exist_ok=True)
-        os.makedirs(f"{original_path}/val/{person}", exist_ok=True)
-        os.makedirs(f"{original_path}/test/{person}", exist_ok=True)
+        mats = list(filter(lambda x: x.endswith(".mat"), os.listdir(os.path.join(original_path, person))))
+        os.makedirs(f"MPIIGaze_preprocessed/train/{person}", exist_ok=True)
+        os.makedirs(f"MPIIGaze_preprocessed/val/{person}", exist_ok=True)
+        os.makedirs(f"MPIIGaze_preprocessed/test/{person}", exist_ok=True)
         for i, mat in enumerate(mats):
             if i < .15*len(mats):
-                shutil.move(f"{original_path}/{person}/{mat}", f"{original_path}/test/{person}/{mat}")
+                shutil.copy(os.path.join(original_path, person, mat), f"MPIIGaze_preprocessed/test/{person}/{mat}")
             elif i < .3*len(mats):
-                shutil.move(f"{original_path}/{person}/{mat}", f"{original_path}/val/{person}/{mat}")
+                shutil.copy(os.path.join(original_path, person, mat), f"MPIIGaze_preprocessed/val/{person}/{mat}")
             else:
-                shutil.move(f"{original_path}/{person}/{mat}", f"{original_path}/train/{person}/{mat}")
-        os.rmdir(f"{original_path}/{person}/")
+                shutil.copy(os.path.join(original_path, person, mat), f"MPIIGaze_preprocessed/train/{person}/{mat}")
+    # Convert .mat files to .pt files for faster loading
+    for split in ["train", "val", "test"]:
+        for person in fps:
+            mats = filter(lambda x: x.endswith(".mat"), os.listdir(f"MPIIGaze_preprocessed/{split}/{person}"))
+            for mat in mats:
+                data = loadmat(f"MPIIGaze_preprocessed/{split}/{person}/{mat}")
+                for side in ["left", "right"]:
+                    datum = data["data"][side].item()
+                    for i in range(len(datum["image"].item())):
+                        img = torch.unsqueeze(torch.tensor(datum["image"].item()[i]).float()/255., -1)
+                        pose = torch.tensor(datum["pose"].item()[i]).float()
+                        gaze = torch.tensor(datum["gaze"].item()[i]).float()
+                        torch.save((img, pose, gaze), f"MPIIGaze_preprocessed/{split}/{person}/{mat[:-4]}_{i}_{side}.pt")
+                os.remove(f"MPIIGaze_preprocessed/{split}/{person}/{mat}")
