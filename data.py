@@ -5,6 +5,7 @@ import jax, os, torchvision, torch, numpy as np, cv2, shutil
 from torch.utils.data import Dataset, DataLoader, default_collate
 from jax import numpy as jnp
 from functools import partial
+from itertools import product
 
 def create_digits(beta, batch_size=64, n_clients=4, client_overlap=1.):
     # Note: n_clients must be 4 for now due implementation limitations, and shuffle_per_client is not implemented
@@ -171,12 +172,16 @@ class MPIIGaze(Dataset):
         return sum(len(v) for v in self.files.values())//self.n_clients
 
     def __getitem__(self, idx):
+        # Notice that the data is sorted per participant, which are interleaved here
         client = self.clients[idx%self.n_clients] 
         i = idx//self.n_clients%len(self.files[client]) # i.e., the how-manyth time this client was seen wrapped around its number of samples
         img, label, aux = torch.load(self.files[client][i])
         label = torch.asarray([torch.arcsin(-label[1]), torch.arctan2(-label[0], -label[2])])
+        regions = torch.cartesian_prod(torch.linspace(-.5,.5/2,4),torch.linspace(-.5,.5/2,4))+.625
+        label = ((label - regions)**2).sum(axis=1).sqrt().argmin()
+        label = torch.eye(4*4)[label]
         return img, aux, label
-    
+
 def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
     Only one type of skew can be applied at a time, with the following options:
@@ -211,7 +216,7 @@ def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.nda
     elif skew=="label":
         # Sort the non-shared samples by label value
         indiv_stop = int(indiv_frac*len(imgs)*n_clients)
-        sorted_idxs = jnp.argsort(jnp.arctan2(*labels[:indiv_stop].T))
+        sorted_idxs = jnp.argsort(labels[:indiv_stop].argmax(axis=1))
         # Divide into n_clients groups
         group_size = len(sorted_idxs)//n_clients
         indiv_idxs = [list(sorted_idxs[i*group_size:(i+1)*group_size]) for i in range(n_clients)]
@@ -223,7 +228,8 @@ def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.nda
 
     return jnp.stack(clients_auxs, 0), jnp.stack(clients_imgs, 0), jnp.stack(clients_labels, 0)
 
-def get_gaze(skew:str=None, batch_size=128, n_clients=4, beta:float=0, path="MPIIGaze_preprocessed", partition="train", **kwargs)->DataLoader:
+def get_gaze(skew:str="feature", batch_size=64, n_clients=4, beta:float=0, path="MPIIGaze_preprocessed", partition="train", **kwargs)->DataLoader:
+    assert skew in ["feature", "overlap", "label"], "Skew must be one of 'feature', 'overlap', or 'label'. For no skew, specify beta=0."
     assert beta>=0 and beta<=1, "Beta must be between 0 and 1"
     beta = 1-beta if skew=="overlap" else beta
     # Fractions derived
