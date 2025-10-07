@@ -228,7 +228,7 @@ def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.nda
 
     return jnp.stack(clients_auxs, 0), jnp.stack(clients_imgs, 0), jnp.stack(clients_labels, 0)
 
-def get_gaze(skew:str="feature", batch_size=64, n_clients=4, beta:float=0, path="MPIIGaze_preprocessed", partition="train", **kwargs)->DataLoader:
+def get_gaze(skew:str="feature", batch_size=128, n_clients=4, beta:float=0, path="MPIIGaze_preprocessed", partition="train", **kwargs)->DataLoader:
     assert skew in ["feature", "overlap", "label"], "Skew must be one of 'feature', 'overlap', or 'label'. For no skew, specify beta=0."
     assert beta>=0 and beta<=1, "Beta must be between 0 and 1"
     beta = 1-beta if skew=="overlap" else beta
