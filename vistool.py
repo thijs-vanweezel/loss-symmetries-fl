@@ -1,10 +1,11 @@
 import optax, scipy, numpy as np, matplotlib as mpl
 from jax import numpy as jnp
 from flax import nnx
+from functools import reduce
 from matplotlib import pyplot as plt
 plt.style.use("seaborn-v0_8-pastel")
 
-def pca_plot(pca, model_idx, x, y, reconstruct, filename, epochs, reduced_params=None, all_params=None, beta_min=None, alpha_min=None, alpha_max=None, beta_max=None, points=30, levels=15, type="density", labels=True):
+def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=None, all_params=None, beta_min=None, alpha_min=None, alpha_max=None, beta_max=None, points=30, levels=15, type="density", labels=True, accs=None):
     if reduced_params is None:
         # Perform pca
         reduced_params = pca.transform(all_params)
@@ -18,15 +19,17 @@ def pca_plot(pca, model_idx, x, y, reconstruct, filename, epochs, reduced_params
     beta_grid = jnp.linspace(beta_min, beta_max, points) #(-3.2, 2.2, points)
 
     # For sampled points on the 2d plane, compute the accuracy
-    accs = jnp.zeros((points, points))
-    for i, alpha_ in enumerate(alpha_grid):
-        for j, beta_ in enumerate(beta_grid):
-            # Reconstruct the model for some point in the 2d plane
-            params = pca.inverse_transform(jnp.array([[alpha_, beta_]])).reshape(-1)
-            model = reconstruct(params)
-            # Compute accuracy
-            acc = (model(x).argmax(-1)==y).mean() # optax.losses.softmax_cross_entropy(model(x), jnp.eye(10)[y]).mean()
-            accs = accs.at[i,j].set(acc)
+    if accs is None:
+        accs = jnp.zeros((points, points))
+        for i, alpha_ in enumerate(alpha_grid):
+            for j, beta_ in enumerate(beta_grid):
+                # Reconstruct the model for some point in the 2d plane
+                params = pca.inverse_transform(jnp.array([[alpha_, beta_]])).reshape(-1)
+                model = reconstruct(params)
+                # Compute accuracy
+                acc_fn = nnx.jit(nnx.vmap(lambda x,z,y: (model(x,z).argmax(-1)==y.argmax(-1)).mean(), in_axes=(0,0,0)))
+                acc = reduce(acc_fn, ds, 0.) / len(ds)
+                accs = accs.at[i,j].set(acc.mean()) # mean over clients' data, i.e., global data accuracy
 
     # Plot
     fig, ax = plt.subplots(figsize=(6,6), dpi=300)
@@ -77,3 +80,5 @@ def pca_plot(pca, model_idx, x, y, reconstruct, filename, epochs, reduced_params
     plt.xticks([])
     plt.yticks([])
     fig.savefig(filename)
+
+    return accs
