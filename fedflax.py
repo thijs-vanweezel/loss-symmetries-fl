@@ -58,7 +58,7 @@ def train(model, opt_create, ds_train, ds_val, ell, local_epochs, filename=None,
     losses = jnp.zeros((0,n+1)) # last column for validation loss
     r = 0
     patience = 1
-    while r<max_rounds and (r<=1 or patience<=max_patience):
+    while r<=max_rounds and (max_patience is None or r<=1 or patience<=max_patience):
         # Local training
         losses = jnp.concat([losses, jnp.zeros((1,n+1))])
         for epoch in range(local_epochs):
