@@ -5,7 +5,7 @@ from functools import reduce
 from matplotlib import pyplot as plt
 plt.style.use("seaborn-v0_8-pastel")
 
-def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=None, all_params=None, beta_min=None, alpha_min=None, alpha_max=None, beta_max=None, points=30, levels=15, type="density", labels=True, accs=None):
+def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=None, all_params=None, beta_min=None, alpha_min=None, alpha_max=None, beta_max=None, points=15, levels=15, type="density", labels=True, accs=None):
     if reduced_params is None:
         # Perform pca
         reduced_params = pca.transform(all_params)
@@ -20,6 +20,7 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
 
     # For sampled points on the 2d plane, compute the accuracy
     if accs is None:
+        acc_fn = nnx.jit(nnx.vmap(lambda x,z,y: (model(x,z,train=False).argmax(-1)==y.argmax(-1)).mean(), in_axes=(0,0,0)))
         accs = jnp.zeros((points, points))
         for i, alpha_ in enumerate(alpha_grid):
             for j, beta_ in enumerate(beta_grid):
@@ -27,8 +28,7 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
                 params = pca.inverse_transform(jnp.array([[alpha_, beta_]])).reshape(-1)
                 model = reconstruct(params)
                 # Compute accuracy
-                acc_fn = nnx.jit(nnx.vmap(lambda x,z,y: (model(x,z).argmax(-1)==y.argmax(-1)).mean(), in_axes=(0,0,0)))
-                acc = reduce(acc_fn, ds, 0.) / len(ds)
+                acc = reduce(lambda acc, b: acc + acc_fn(*b), ds, 0.)
                 accs = accs.at[i,j].set(acc.mean()) # mean over clients' data, i.e., global data accuracy
 
     # Plot
