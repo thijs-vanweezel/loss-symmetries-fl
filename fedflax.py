@@ -37,12 +37,16 @@ def aggregate(model_g, updates, n):
     models = nnx.from_tree(jax.tree.unflatten(struct, params_all))
     return model_g, models
 
-def train(Model, opt, ds_train, ds_val, ell, local_epochs, filename=None, n=4, max_patience=5):
-    # Identically initialized models, interpretable as collection by nnx 
-    keys = nnx.vmap(lambda k: nnx.Rngs(k))(jnp.array([jax.random.key(42)]*n))
-    models = nnx.vmap(Model)(keys)
+def train(model, opt_create, ds_train, ds_val, ell, local_epochs, filename=None, n=4, max_patience=5, max_rounds=jnp.inf):
+    # Identically initialized models, interpretable as collection by nnx
+    if callable(model): 
+        keys = nnx.vmap(lambda k: nnx.Rngs(k))(jnp.array([jax.random.key(42)]*n))
+        models = nnx.vmap(model)(keys)
+    else:
+        print("Using provided initial models")
+        models = model
     # Ditto for optimizers
-    opts = nnx.vmap(opt)(models)
+    opts = nnx.vmap(opt_create)(models)
     train_step = return_train_step(ell)
     # Init and save
     params, struct = jax.tree.flatten(nnx.to_tree(models))
@@ -54,7 +58,7 @@ def train(Model, opt, ds_train, ds_val, ell, local_epochs, filename=None, n=4, m
     losses = jnp.zeros((0,n+1)) # last column for validation loss
     r = 0
     patience = 1
-    while r<=(1-(0 if max_patience else 1)) or patience<=(max_patience or -1):
+    while r<max_rounds and (r<=1 or patience<=max_patience):
         # Local training
         losses = jnp.concat([losses, jnp.zeros((1,n+1))])
         for epoch in range(local_epochs):
