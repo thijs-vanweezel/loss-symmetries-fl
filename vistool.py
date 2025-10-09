@@ -5,7 +5,7 @@ from functools import reduce
 from matplotlib import pyplot as plt
 plt.style.use("seaborn-v0_8-pastel")
 
-def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=None, all_params=None, beta_min=None, alpha_min=None, alpha_max=None, beta_max=None, points=15, levels=15, type="density", labels=True, accs=None):
+def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=None, all_params=None, beta_min=None, alpha_min=None, alpha_max=None, beta_max=None, points=20, levels=15, type="density", labels=True, accs=None):
     if reduced_params is None:
         # Perform pca
         reduced_params = pca.transform(all_params)
@@ -13,14 +13,14 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
     # Define grid
     alpha_min = alpha_min or reduced_params[:,0].min()-.1
     alpha_max = alpha_max or reduced_params[:,0].max()+.1
-    alpha_grid = jnp.linspace(alpha_min, alpha_max, points) #(-17, -3, points)
+    alpha_grid = jnp.linspace(alpha_min, alpha_max, points)
     beta_min = beta_min or reduced_params[:,1].min()-.1
     beta_max = beta_max or reduced_params[:,1].max()+.1
-    beta_grid = jnp.linspace(beta_min, beta_max, points) #(-3.2, 2.2, points)
+    beta_grid = jnp.linspace(beta_min, beta_max, points)
 
     # For sampled points on the 2d plane, compute the accuracy
     if accs is None:
-        acc_fn = nnx.jit(nnx.vmap(lambda x,z,y: (model(x,z,train=False).argmax(-1)==y.argmax(-1)).mean(), in_axes=(0,0,0)))
+        acc_fn = nnx.jit(nnx.vmap(lambda m,x,z,y: (m(x,z,train=False).argmax(-1)==y.argmax(-1)).mean(), in_axes=(None,0,0,0)))
         accs = jnp.zeros((points, points))
         for i, alpha_ in enumerate(alpha_grid):
             for j, beta_ in enumerate(beta_grid):
@@ -28,7 +28,7 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
                 params = pca.inverse_transform(jnp.array([[alpha_, beta_]])).reshape(-1)
                 model = reconstruct(params)
                 # Compute accuracy
-                acc = reduce(lambda acc, b: acc + acc_fn(*b), ds, 0.)
+                acc = reduce(lambda acc, b: acc + acc_fn(model,*b), ds, 0.) / len(ds)
                 accs = accs.at[i,j].set(acc.mean()) # mean over clients' data, i.e., global data accuracy
 
     # Plot
@@ -36,11 +36,11 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
     fig.tight_layout()
     ax.set_box_aspect(1)
     # Plot the level sets, exponential scale
-    maxi, mini = accs.max(), accs.min() #accs[points//4:-points//4, points//4:-points//4].max(), accs[points//4:-points//4, points//4:-points//4].min()
-    norm = mpl.colors.Normalize(vmin=0., vmax=1.)#(vmin=.35, vmax=.72)
+    maxi, mini = accs.max(), accs.min()
+    norm = mpl.colors.Normalize(vmin=mini, vmax=maxi)
     if type=="density":
-        alpha_grid_fine = np.linspace(alpha_grid.min(), alpha_grid.max(), 1000) #(-17, -3, 1000)
-        beta_grid_fine = np.linspace(beta_grid.min(), beta_grid.max(), 1000) #(-3.2, 2.2, 1000)
+        alpha_grid_fine = np.linspace(alpha_grid.min(), alpha_grid.max(), 1000) # using alpha_min and alpha_max directly causes issues with pcolormesh
+        beta_grid_fine = np.linspace(beta_grid.min(), beta_grid.max(), 1000)
         mesh = np.meshgrid(alpha_grid_fine, beta_grid_fine)
         plot = ax.pcolormesh(
             alpha_grid_fine,
