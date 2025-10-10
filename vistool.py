@@ -29,7 +29,7 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
                 model = reconstruct(params)
                 # Compute accuracy
                 acc = reduce(lambda acc, b: acc + acc_fn(model,*b), ds, 0.) / len(ds)
-                accs = accs.at[i,j].set(acc.mean()) # mean over clients' data, i.e., global data accuracy
+                accs = accs.at[i,j].set(acc.mean()+1e-5) # mean over clients' data, i.e., global data accuracy
 
     # Plot
     fig, ax = plt.subplots(figsize=(6,6), dpi=300)
@@ -37,7 +37,7 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
     ax.set_box_aspect(1)
     # Plot the level sets, exponential scale
     maxi, mini = accs.max(), accs.min()
-    norm = mpl.colors.LogNorm(vmin=mini+1e-5, vmax=maxi+1e-5)
+    norm = mpl.colors.LogNorm(vmin=mini, vmax=maxi)
     if type=="density":
         alpha_grid_fine = np.linspace(alpha_grid.min(), alpha_grid.max(), 1000) # using alpha_min and alpha_max directly causes issues with pcolormesh
         beta_grid_fine = np.linspace(beta_grid.min(), beta_grid.max(), 1000)
@@ -61,7 +61,7 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
         )
     if labels:
         bar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=plot.cmap), ax=ax, shrink=0.8, ticks=None if type=="density"else plot.levels)
-        bar.set_label("Cross entropy")#("Accuracy")
+        bar.set_label("Accuracy")
     # Plot the model paths (assume params are sorted by optimization step)
     for i in jnp.unique(model_idx):
         idx = jnp.where(model_idx==i)[0]
