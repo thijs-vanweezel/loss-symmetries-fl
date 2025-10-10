@@ -5,7 +5,7 @@ from functools import reduce
 from matplotlib import pyplot as plt
 plt.style.use("seaborn-v0_8-pastel")
 
-def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=None, all_params=None, beta_min=None, alpha_min=None, alpha_max=None, beta_max=None, points=20, levels=15, type="density", labels=True, accs=None):
+def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=None, all_params=None, beta_min=None, alpha_min=None, alpha_max=None, beta_max=None, points=20, levels=15, type="density", labels=True, errs=None):
     if reduced_params is None:
         # Perform pca
         reduced_params = pca.transform(all_params)
@@ -19,9 +19,9 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
     beta_grid = jnp.linspace(beta_min, beta_max, points)
 
     # For sampled points on the 2d plane, compute the accuracy
-    if accs is None:
+    if errs is None:
         acc_fn = nnx.jit(nnx.vmap(lambda m,x,z,y: (m(x,z,train=False).argmax(-1)==y.argmax(-1)).mean(), in_axes=(None,0,0,0)))
-        accs = jnp.zeros((points, points))
+        errs = jnp.zeros((points, points))
         for i, alpha_ in enumerate(alpha_grid):
             for j, beta_ in enumerate(beta_grid):
                 # Reconstruct the model for some point in the 2d plane
@@ -29,14 +29,14 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
                 model = reconstruct(params)
                 # Compute accuracy
                 acc = reduce(lambda acc, b: acc + acc_fn(model,*b), ds, 0.) / len(ds)
-                accs = accs.at[i,j].set(acc.mean()+1e-5) # mean over clients' data, i.e., global data accuracy
+                errs = errs.at[i,j].set(1-acc.mean()+1e-5) # mean over clients' data, i.e., global data error rate
 
     # Plot
     fig, ax = plt.subplots(figsize=(6,6), dpi=300)
     fig.tight_layout()
     ax.set_box_aspect(1)
     # Plot the level sets, exponential scale
-    maxi, mini = accs.max(), accs.min()
+    maxi, mini = errs.max(), errs.min()
     norm = mpl.colors.LogNorm(vmin=mini, vmax=maxi)
     if type=="density":
         alpha_grid_fine = np.linspace(alpha_grid.min(), alpha_grid.max(), 1000) # using alpha_min and alpha_max directly causes issues with pcolormesh
@@ -45,7 +45,7 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
         plot = ax.pcolormesh(
             alpha_grid_fine,
             beta_grid_fine,
-            scipy.interpolate.interpn((alpha_grid, beta_grid), accs, np.vstack([mesh[0].ravel(), mesh[1].ravel()]).T, method='cubic').reshape(1000,1000),
+            scipy.interpolate.interpn((alpha_grid, beta_grid), errs, np.vstack([mesh[0].ravel(), mesh[1].ravel()]).T, method='cubic').reshape(1000,1000),
             shading="auto",
             cmap="magma", 
             norm=norm,
@@ -54,7 +54,7 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
         plot = ax.contour(
         alpha_grid,
         beta_grid,
-        accs.T,
+        errs.T,
         levels=jnp.log(jnp.linspace(jnp.exp(mini), jnp.exp(maxi), levels)),
         cmap="magma",
         norm=norm
@@ -81,4 +81,4 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
     plt.yticks([])
     fig.savefig(filename)
 
-    return accs
+    return errs
