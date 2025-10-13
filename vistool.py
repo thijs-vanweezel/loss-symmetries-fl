@@ -37,7 +37,7 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
     ax.set_box_aspect(1)
     # Plot the level sets, exponential scale
     maxi, mini = errs.max(), errs.min()
-    norm = mpl.colors.LogNorm(vmin=mini, vmax=maxi)
+    norm = mpl.colors.LogNorm(vmin=1e-5, vmax=1.)
     if type=="density":
         alpha_grid_fine = np.linspace(alpha_grid.min(), alpha_grid.max(), 1000) # using alpha_min and alpha_max directly causes issues with pcolormesh
         beta_grid_fine = np.linspace(beta_grid.min(), beta_grid.max(), 1000)
