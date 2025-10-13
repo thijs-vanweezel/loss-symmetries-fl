@@ -41,7 +41,7 @@ def cast(model_g, n):
     models = nnx.from_tree(jax.tree.unflatten(struct, params_all))
     return models
 
-def train(model, opt_create, ds_train, ds_val, ell, local_epochs, filename=None, n=4, max_patience=5, max_rounds=jnp.inf):
+def train(model, opt_create, ds_train, ds_val, ell, local_epochs, filename=None, n=4, max_patience=None, rounds=None):
     # Identically initialized models, interpretable as collection by nnx
     if callable(model): 
         keys = nnx.vmap(lambda k: nnx.Rngs(k))(jnp.array([jax.random.key(42)]*n))
@@ -62,7 +62,7 @@ def train(model, opt_create, ds_train, ds_val, ell, local_epochs, filename=None,
     losses = jnp.zeros((0,n+1)) # last column for validation loss
     r = 0
     patience = 1
-    while r<=max_rounds and (max_patience is None or r<=1 or patience<=max_patience):
+    while r!=rounds and (max_patience is None or r<=1 or patience<=max_patience):
         # Re-initialize models to global model
         models = cast(model_g, n)
         # Local training
