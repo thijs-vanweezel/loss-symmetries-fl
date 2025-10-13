@@ -29,7 +29,7 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
                 model = reconstruct(params)
                 # Compute accuracy
                 acc = reduce(lambda acc, b: acc + acc_fn(model,*b), ds, 0.) / len(ds)
-                errs = errs.at[i,j].set(1-acc.mean()+1e-5) # mean over clients' data, i.e., global data error rate
+                errs = errs.at[i,j].set(1-acc.mean()) # mean over clients' data, i.e., global data error rate
 
     # Plot
     fig, ax = plt.subplots(figsize=(6,6), dpi=300)
@@ -37,7 +37,7 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
     ax.set_box_aspect(1)
     # Plot the level sets, exponential scale
     maxi, mini = errs.max(), errs.min()
-    norm = mpl.colors.LogNorm(vmin=1e-5, vmax=1.)
+    norm = mpl.colors.Normalize(vmin=.5, vmax=1.) # TODO: 0.5 error is pretty bad
     if type=="density":
         alpha_grid_fine = np.linspace(alpha_grid.min(), alpha_grid.max(), 1000) # using alpha_min and alpha_max directly causes issues with pcolormesh
         beta_grid_fine = np.linspace(beta_grid.min(), beta_grid.max(), 1000)
