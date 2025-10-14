@@ -43,7 +43,7 @@ def cast(model_g, n):
 
 def train(model, opt_create, ds_train, ds_val, ell, local_epochs, filename=None, n=4, max_patience=None, rounds=None):
     # Identically initialized models, interpretable as collection by nnx
-    if callable(model): 
+    if isinstance(model, type):
         keys = nnx.vmap(lambda k: nnx.Rngs(k))(jnp.array([jax.random.key(42)]*n))
         models = nnx.vmap(model)(keys)
     else:
