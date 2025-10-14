@@ -99,3 +99,28 @@ class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
         x = jnp.mean(x, axis=(1,2))
         x = self.fc(jnp.concatenate([x, z], axis=-1))
         return x
+    
+# LeNet for 36X60 images + 3 auxiliary features
+class LeNet(nnx.Module):
+    def __init__(self, key):
+        super().__init__()
+        self.conv1 = nnx.Conv(1, 6, (5,5), rngs=key, padding="VALID")
+        self.conv2 = nnx.Conv(6, 16, (5,5), rngs=key, padding="VALID")
+        self.fc1 = nnx.Linear(6*12*16, 120, rngs=key)
+        self.fc2 = nnx.Linear(120, 84, rngs=key)
+        self.fc3 = nnx.Linear(84, 16, rngs=key)
+    def __call__(self, x, z, train=None):
+        x = self.conv1(x)
+        x = nnx.relu(x)
+        x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
+        x = self.conv2(x)
+        x = nnx.relu(x)
+        x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
+        x = jnp.reshape(x, (x.shape[0], -1))
+        x = jnp.concatenate([x, z], axis=-1)
+        x = self.fc1(x)
+        x = nnx.relu(x)
+        x = self.fc2(x)
+        x = nnx.relu(x)
+        x = self.fc3(x)
+        return x
