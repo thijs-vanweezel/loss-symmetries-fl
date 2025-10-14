@@ -97,7 +97,7 @@ def train(model, opt_create, ds_train, ds_val, ell, local_epochs, filename=None,
     # Save final params
     if filename:
         with NpyAppendArray(filename) as f:
-            f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(nnx.to_tree(cast(models, n)))], axis=1))
+            f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(nnx.to_tree(cast(model_g, n)))], axis=1))
 
     # Returns all kinds of output for the various analyses
     return updates, models
