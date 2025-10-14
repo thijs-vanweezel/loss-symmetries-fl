@@ -106,7 +106,7 @@ class LeNet(nnx.Module):
         super().__init__()
         self.conv1 = nnx.Conv(1, 6, (5,5), rngs=key, padding="VALID")
         self.conv2 = nnx.Conv(6, 16, (5,5), rngs=key, padding="VALID")
-        self.fc1 = nnx.Linear(6*12*16, 120, rngs=key)
+        self.fc1 = nnx.Linear(6*12*16+3, 120, rngs=key)
         self.fc2 = nnx.Linear(120, 84, rngs=key)
         self.fc3 = nnx.Linear(84, 16, rngs=key)
     def __call__(self, x, z, train=None):
