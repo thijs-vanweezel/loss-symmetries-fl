@@ -177,7 +177,10 @@ class MPIIGaze(Dataset):
         img, aux, label = torch.load(self.files[client][i])
         img = img if self.files[client][i].endswith("left.pt") else torch.flip(img, [1])
         label = torch.asarray([torch.arcsin(-label[1]), torch.arctan2(-label[0], -label[2])]) # polar coordinates
-        regions = torch.cartesian_prod(torch.linspace(-0.3675091, 0.0831264, 4), torch.linspace(-0.31378174, 0.38604215, 4)) #+ .5 # mins and maxs of training set
+        regions = torch.concat([ # TODO: is there a better way to create quadrants?
+            torch.cartesian_prod(torch.linspace(-0.3675091, 0.0831264, 4), torch.linspace(-0.31378174, 0.38604215, 4)[:2]),
+            torch.cartesian_prod(torch.linspace(-0.3675091, 0.0831264, 4), torch.linspace(-0.31378174, 0.38604215, 4)[2:])
+        ]) # mins and maxs of training set
         label = torch.abs(label - regions).sum(axis=1).argmin() # nearest region
         label = torch.eye(4*4)[label] # one-hot encode
         return img, aux, label
@@ -211,7 +214,7 @@ def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.nda
         clients_imgs = [imgs[idxs] for idxs in clients_idxs]
         clients_labels = [labels[idxs] for idxs in clients_idxs]
 
-    # Label skew, by evenly dividing the samples into n_clients directional groups, and then sharing a portion of the total samples
+    # Label skew, by evenly dividing the samples into n directional groups, and then sharing a portion of the total samples
     # Assumes there is no order to the labels' values
     elif skew=="label":
         # Sort the non-shared samples by label value
