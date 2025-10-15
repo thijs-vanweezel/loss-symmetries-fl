@@ -5,7 +5,7 @@ from functools import reduce
 from matplotlib import pyplot as plt
 plt.style.use("seaborn-v0_8-pastel")
 
-def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=None, all_params=None, beta_min=None, alpha_min=None, alpha_max=None, beta_max=None, points=20, levels=15, type="density", labels=True, errs=None):
+def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=None, all_params=None, beta_min=None, alpha_min=None, alpha_max=None, beta_max=None, points=30, levels=15, type="density", labels=True, errs=None):
     if reduced_params is None:
         # Perform pca
         reduced_params = pca.transform(all_params)
@@ -36,29 +36,18 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
     fig.tight_layout()
     ax.set_box_aspect(1)
     # Plot the level sets, exponential scale
-    maxi, mini = errs.max(), errs.min()
     norm = mpl.colors.Normalize(vmin=.5, vmax=1.) # TODO: 0.5 error is pretty bad
-    if type=="density":
-        alpha_grid_fine = np.linspace(alpha_grid.min(), alpha_grid.max(), 1000) # using alpha_min and alpha_max directly causes issues with pcolormesh
-        beta_grid_fine = np.linspace(beta_grid.min(), beta_grid.max(), 1000)
-        mesh = np.meshgrid(alpha_grid_fine, beta_grid_fine)
-        plot = ax.pcolormesh(
-            alpha_grid_fine,
-            beta_grid_fine,
-            scipy.interpolate.interpn((alpha_grid, beta_grid), errs, np.vstack([mesh[0].ravel(), mesh[1].ravel()]).T, method='cubic').reshape(1000,1000),
-            shading="auto",
-            cmap="magma", 
-            norm=norm,
-        )
-    elif type=="contour":
-        plot = ax.contour(
-        alpha_grid,
-        beta_grid,
-        errs.T,
-        levels=jnp.log(jnp.linspace(jnp.exp(mini), jnp.exp(maxi), levels)),
-        cmap="magma",
-        norm=norm
-        )
+    alpha_grid_fine = np.linspace(alpha_grid.min(), alpha_grid.max(), 1000) # using alpha_min and alpha_max directly causes issues with pcolormesh
+    beta_grid_fine = np.linspace(beta_grid.min(), beta_grid.max(), 1000)
+    mesh = np.meshgrid(alpha_grid_fine, beta_grid_fine)
+    plot = ax.pcolormesh(
+        alpha_grid_fine,
+        beta_grid_fine,
+        scipy.interpolate.interpn((alpha_grid, beta_grid), errs, np.vstack([mesh[0].ravel(), mesh[1].ravel()]).T, method='cubic').reshape(1000,1000),
+        shading="auto",
+        cmap="magma", 
+        norm=norm,
+    )
     if labels:
         bar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=plot.cmap), ax=ax, shrink=0.8, ticks=None if type=="density"else plot.levels)
         bar.set_label("Accuracy")
@@ -72,7 +61,6 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
         # Points
         ax.scatter(reduced_params[idx,0], reduced_params[idx,1], c=colors, s=10)
     # Show
-    # ax.set_title("Accuracy surface along top two principal directions in parameter space")
     if labels:
         handles, labels = ax.get_legend_handles_labels()
         handle = plt.Line2D([0], [0], marker="o", color="none", markerfacecolor="C0", label="Aggr point")
