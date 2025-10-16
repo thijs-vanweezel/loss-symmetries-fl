@@ -56,7 +56,7 @@ def train(model, opt_create, ds_train, ds_val, ell, local_epochs, filename=None,
     params, struct = jax.tree.flatten(nnx.to_tree(models))
     model_g = nnx.from_tree(jax.tree.unflatten(struct, jax.tree.map(lambda x: jnp.mean(x, axis=0), params)))
     # Adjust loss function so that it can be used as stand-alone
-    ell_val = nnx.jit(nnx.vmap(partial(ell, train=False), in_axes=(0,None,0,0,0)))
+    acc_fn = nnx.jit(nnx.vmap(lambda m,x,z,y: (m(x,z,train=False).argmax(-1)==y.argmax(-1)).mean()))
 
     # Communication rounds
     losses = jnp.zeros((0,n+1)) # last column for validation loss
@@ -81,10 +81,10 @@ def train(model, opt_create, ds_train, ds_val, ell, local_epochs, filename=None,
                 losses = losses.at[-1,:-1].set(losses[-1,:-1] + loss)
         # Evaluate
         losses = losses.at[-1,:-1].set(losses[-1,:-1]/local_epochs/(b+1))
-        val_loss = reduce(lambda a,b: a+ell_val(models, model_g, *b)[0].mean(), ds_val, 0.)
+        val_loss = reduce(lambda a,b: a+acc_fn(models, *b).mean(), ds_val, 0.)
         val_loss /= len(ds_val)
         losses = losses.at[-1, -1].set(val_loss)
-        print(f"round {r} global validation loss: {val_loss}")
+        print(f"round {r} validation accuracy (mean over clients): {val_loss}")
         # Aggregate
         updates = get_updates(model_g, models)
         model_g = aggregate(model_g, updates)
