@@ -45,7 +45,7 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
         beta_grid_fine,
         scipy.interpolate.interpn((alpha_grid, beta_grid), errs, np.vstack([mesh[0].ravel(), mesh[1].ravel()]).T, method='cubic').reshape(1000,1000),
         shading="auto",
-        cmap="magma", 
+        cmap="cividis", # summer is not perceptually uniform, magma has more than two colors
         norm=norm,
     )
     if labels:
