@@ -81,16 +81,16 @@ def train(model, opt_create, ds_train, ds_val, ell, local_epochs, filename=None,
                 losses = losses.at[-1,:-1].set(losses[-1,:-1] + loss)
         # Evaluate
         losses = losses.at[-1,:-1].set(losses[-1,:-1]/local_epochs/(b+1))
-        val_loss = reduce(lambda a,b: a+acc_fn(models, *b).mean(), ds_val, 0.)
-        val_loss /= len(ds_val)
-        losses = losses.at[-1, -1].set(val_loss)
-        print(f"round {r} validation accuracy (mean over clients): {val_loss}")
+        val_acc = reduce(lambda a,b: a+acc_fn(models, *b).mean(), ds_val, 0.)
+        val_acc /= len(ds_val)
+        losses = losses.at[-1, -1].set(val_acc)
+        print(f"round {r} validation accuracy (mean over clients): {val_acc}")
         # Aggregate
         updates = get_updates(model_g, models)
         model_g = aggregate(model_g, updates)
         # Check if model is converged
         r += 1
-        if r>1 and losses[-1,-1]>losses[-patience-1,-1]:
+        if r>1 and val_acc<=losses[-patience-1,-1]:
             patience += 1
         else:
             patience = 1
