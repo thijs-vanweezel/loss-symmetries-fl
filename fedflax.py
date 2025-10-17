@@ -41,21 +41,10 @@ def cast(model_g, n):
     models = nnx.from_tree(jax.tree.unflatten(struct, params_all))
     return models
 
-def train(model, opt_create, ds_train, ds_val, ell, local_epochs, filename=None, n=4, max_patience=None, rounds=None):
-    # Identically initialized models, interpretable as collection by nnx
-    if isinstance(model, type):
-        keys = nnx.vmap(lambda k: nnx.Rngs(k))(jnp.array([jax.random.key(42)]*n))
-        models = nnx.vmap(model)(keys)
-    else:
-        print("Using provided initial models")
-        models = model
-    # Ditto for optimizers
-    opts = nnx.vmap(opt_create)(models)
+def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs, filename=None, n=4, max_patience=None, rounds=None):
+    # Parallelize train step
     train_step = return_train_step(ell)
-    # Init and save
-    params, struct = jax.tree.flatten(nnx.to_tree(models))
-    model_g = nnx.from_tree(jax.tree.unflatten(struct, jax.tree.map(lambda x: jnp.mean(x, axis=0), params)))
-    # Adjust loss function so that it can be used as stand-alone
+    # Acc function that can be used as stand-alone
     acc_fn = nnx.jit(nnx.vmap(lambda m,x,z,y: (m(x,z,train=False).argmax(-1)==y.argmax(-1)).mean()))
 
     # Communication rounds
@@ -63,8 +52,10 @@ def train(model, opt_create, ds_train, ds_val, ell, local_epochs, filename=None,
     r = 0
     patience = 1
     while r!=rounds and (max_patience is None or r<=1 or patience<=max_patience):
-        # Re-initialize models to global model
+        # Parallelize global model and optimizers
         models = cast(model_g, n)
+        if r==0:
+            opts = nnx.vmap(opt_create)(models)
         # Local training
         losses = jnp.concat([losses, jnp.zeros((1,n+1))])
         for epoch in range(local_epochs):
@@ -75,9 +66,6 @@ def train(model, opt_create, ds_train, ds_val, ell, local_epochs, filename=None,
             # Iterate over batches
             for b, (x_batch, z_batch, y_batch) in enumerate(tqdm(ds_train, leave=False, desc=f"Round {r} Epoch {epoch+1}/{local_epochs}")):
                 loss = train_step(models, model_g, opts, x_batch, z_batch, y_batch)
-                if jnp.isnan(loss).any():
-                    print(losses)
-                    raise ValueError("NaN encountered")
                 losses = losses.at[-1,:-1].set(losses[-1,:-1] + loss)
         # Evaluate
         losses = losses.at[-1,:-1].set(losses[-1,:-1]/local_epochs/(b+1))
