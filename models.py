@@ -127,8 +127,7 @@ class LeNet(nnx.Module):
         x = self.fc3(x)
         return x
 
-key = jax.random.key(42)
-def teleport_lenet(model, lower=1e-8, upper=1.):
+def teleport_lenet(model, key, tau_range=.1):
     assert isinstance(model, LeNet), "Teleportation must be (slightly) adjusted for models other than LeNet-5"
     # Extract params
     model_tree = nnx.to_tree(model)
@@ -136,9 +135,9 @@ def teleport_lenet(model, lower=1e-8, upper=1.):
 
     # Assign tau to the output channels of each kernel
     def random(size):
-        global key
+        nonlocal key
         _, key = jax.random.split(key)
-        return jax.random.uniform(key, size, minval=lower, maxval=upper)
+        return jax.random.uniform(key, size, minval=1.-tau_range, maxval=1.+tau_range)
     tau = jax.tree.map(lambda p: random(p.shape[-1]), params[::2])
     # "Input neurons" require tau=1
     tau_a = [jnp.ones(1)] + jax.tree.leaves(tau) 
@@ -153,6 +152,7 @@ def teleport_lenet(model, lower=1e-8, upper=1.):
 
     # Interleave kernel and bias coefs, as they are originally
     coefs = list(chain(*zip(coefs_bias, coefs_kernel)))
+    globals()['coefs'] = coefs  # For debugging
     # Teleport the model
     params_tele = jax.tree.map(lambda p, c: c*p, params, coefs)
     # Rebuilt the model
