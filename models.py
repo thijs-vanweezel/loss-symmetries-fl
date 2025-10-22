@@ -1,5 +1,7 @@
 from flax import nnx
 from jax import numpy as jnp
+from itertools import chain
+import jax
 
 # Simple model
 class Simple8x8to10(nnx.Module):
@@ -100,7 +102,7 @@ class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
         x = self.fc(jnp.concatenate([x, z], axis=-1))
         return x
     
-# LeNet for 36X60 images + 3 auxiliary features
+# LeNet-5 for 36X60 images + 3 auxiliary features
 class LeNet(nnx.Module):
     def __init__(self, key):
         super().__init__()
@@ -124,3 +126,34 @@ class LeNet(nnx.Module):
         x = nnx.relu(x)
         x = self.fc3(x)
         return x
+
+key = jax.random.key(42)
+def teleport_lenet(model, lower=1e-8, upper=1.):
+    assert isinstance(model, LeNet), "Teleportation must be (slightly) adjusted for models other than LeNet-5"
+    # Extract params
+    model_tree = nnx.to_tree(model)
+    params, struct = jax.tree.flatten(model_tree)
+
+    # Assign tau to the output channels of each kernel
+    def random(size):
+        global key
+        _, key = jax.random.split(key)
+        return jax.random.uniform(key, size, minval=lower, maxval=upper)
+    tau = jax.tree.map(lambda p: random(p.shape[-1]), params[::2])
+    # "Input neurons" require tau=1
+    tau_a = [jnp.ones(1)] + jax.tree.leaves(tau) 
+    tau_a[2] = jnp.tile(tau_a[2], (6,12,1)).flatten() # Transition from conv to flattened fc
+    tau_a[2] = jnp.concat([tau_a[2], jnp.ones(3)])  # Account for auxiliary input neurons
+    # Output neurons require tau=1
+    tau_b = jax.tree.leaves(tau)[:-1] + [jnp.ones(16)]
+    coefs_kernel = jax.tree.map(lambda t_a, t_b: jnp.outer(1/t_a, t_b), tau_a[:-1], tau_b)
+
+    # Due to bias requiring tau=1, this is equivalent to tau + ones(channels_out)
+    coefs_bias = tau_b
+
+    # Interleave kernel and bias coefs, as they are originally
+    coefs = list(chain(*zip(coefs_bias, coefs_kernel)))
+    # Teleport the model
+    params_tele = jax.tree.map(lambda p, c: c*p, params, coefs)
+    # Rebuilt the model
+    return nnx.from_tree(jax.tree.unflatten(struct, params_tele))
