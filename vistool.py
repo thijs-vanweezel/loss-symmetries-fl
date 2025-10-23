@@ -1,11 +1,43 @@
-import optax, scipy, numpy as np, matplotlib as mpl
+import jax, scipy, numpy as np, matplotlib as mpl
 from jax import numpy as jnp
 from flax import nnx
 from functools import reduce
 from matplotlib import pyplot as plt
 plt.style.use("seaborn-v0_8-pastel")
 
-def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=None, all_params=None, beta_min=None, alpha_min=None, alpha_max=None, beta_max=None, points=30, levels=15, type="density", labels=True, errs=None):
+# Utils
+acc_fn = nnx.jit(nnx.vmap(lambda m,x,z,y: (m(x,z,train=False).argmax(-1)==y.argmax(-1)).mean(), in_axes=(None,0,0,0)))
+
+def get_reconstruct(model, client_dim=True):
+    # Function to reconstruct model from flat params
+    params, struct = jax.tree.flatten(nnx.to_tree(model))
+    shapes = [p.shape[int(client_dim):] for p in params]+[None]
+    def reconstruct(flat_params):
+        # Indices of kernels in flat vector
+        slices = [slice
+            (sum(map(lambda s: np.prod(s), shapes[:i])),
+            sum(map(lambda s: np.prod(s), shapes[:i+1])))
+        for i in range(len(shapes)-1)]
+        # Get kernels as correct shape
+        params = [flat_params[sl] for sl in slices]
+        params = [jnp.array(p).reshape(s) for p, s in zip(params, shapes)]
+        # Revert to model
+        return nnx.from_tree(jax.tree.unflatten(struct, params))
+    return reconstruct
+
+def compute_surface(alpha_grid, beta_grid, pca, reconstruct, ds, acc_fn=acc_fn):
+    errs = jnp.zeros((len(alpha_grid), len(beta_grid)))
+    for i, alpha_ in enumerate(alpha_grid):
+        for j, beta_ in enumerate(beta_grid):
+            # Reconstruct the model for some point in the 2d plane
+            params = pca.inverse_transform(jnp.array([[alpha_, beta_]])).reshape(-1)
+            model = reconstruct(params)
+            # Compute accuracy
+            acc = reduce(lambda acc, b: acc + acc_fn(model,*b), ds, 0.) / len(ds)
+            errs = errs.at[i,j].set(1-acc.mean()) # mean over clients' data, i.e., global data error rate
+    return errs
+
+def plot_trajectory(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=None, all_params=None, beta_min=None, alpha_min=None, alpha_max=None, beta_max=None, points=30, levels=15, type="density", labels=True, errs=None):
     if reduced_params is None:
         # Perform pca
         reduced_params = pca.transform(all_params)
@@ -17,19 +49,8 @@ def pca_plot(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=N
     beta_min = beta_min or reduced_params[:,1].min()-.1
     beta_max = beta_max or reduced_params[:,1].max()+.1
     beta_grid = jnp.linspace(beta_min, beta_max, points)
-
     # For sampled points on the 2d plane, compute the accuracy
-    if errs is None:
-        acc_fn = nnx.jit(nnx.vmap(lambda m,x,z,y: (m(x,z,train=False).argmax(-1)==y.argmax(-1)).mean(), in_axes=(None,0,0,0)))
-        errs = jnp.zeros((points, points))
-        for i, alpha_ in enumerate(alpha_grid):
-            for j, beta_ in enumerate(beta_grid):
-                # Reconstruct the model for some point in the 2d plane
-                params = pca.inverse_transform(jnp.array([[alpha_, beta_]])).reshape(-1)
-                model = reconstruct(params)
-                # Compute accuracy
-                acc = reduce(lambda acc, b: acc + acc_fn(model,*b), ds, 0.) / len(ds)
-                errs = errs.at[i,j].set(1-acc.mean()) # mean over clients' data, i.e., global data error rate
+    errs = errs or compute_surface(alpha_grid, beta_grid, pca, reconstruct, ds)
 
     # Plot
     fig, ax = plt.subplots(figsize=(6,6), dpi=300)
