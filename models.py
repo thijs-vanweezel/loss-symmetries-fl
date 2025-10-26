@@ -106,11 +106,11 @@ class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
 class LeNet(nnx.Module):
     def __init__(self, key):
         super().__init__()
-        self.conv1 = nnx.Conv(1, 6, (5,5), rngs=key, padding="VALID")
-        self.conv2 = nnx.Conv(6, 16, (5,5), rngs=key, padding="VALID")
-        self.fc1 = nnx.Linear(6*12*16+3, 120, rngs=key)
-        self.fc2 = nnx.Linear(120, 84, rngs=key)
-        self.fc3 = nnx.Linear(84, 16, rngs=key)
+        self.conv1 = nnx.Conv(1, 8, (4,4), rngs=key, padding="VALID")
+        self.conv2 = nnx.Conv(8, 16, (4,4), rngs=key, padding="VALID")
+        self.fc1 = nnx.Linear(6*12*16+3, 128, rngs=key)
+        self.fc2 = nnx.Linear(128, 64, rngs=key)
+        self.fc3 = nnx.Linear(64, 16, rngs=key)
     def __call__(self, x, z, train=None):
         x = self.conv1(x)
         x = nnx.relu(x)
@@ -152,7 +152,6 @@ def teleport_lenet(model, key, tau_range=.1):
 
     # Interleave kernel and bias coefs, as they are originally
     coefs = list(chain(*zip(coefs_bias, coefs_kernel)))
-    globals()['coefs'] = coefs  # For debugging
     # Teleport the model
     params_tele = jax.tree.map(lambda p, c: c*p, params, coefs)
     # Rebuilt the model
