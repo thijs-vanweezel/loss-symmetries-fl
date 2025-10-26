@@ -67,12 +67,12 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs, filename=Non
             # Collect and save params for visualization
             if filename: save(models, filename, n, overwrite=(r==0 and epoch==0))
             # Iterate over batches
-            for b, (x_batch, z_batch, y_batch) in enumerate(tqdm(ds_train, leave=False, desc=f"Round {r} Epoch {epoch+1}/{local_epochs}")):
+            for x_batch, z_batch, y_batch in tqdm(ds_train, leave=False, desc=f"Round {r} Epoch {epoch+1}/{local_epochs}"):
                 loss = train_step(models, model_g, opts, x_batch, z_batch, y_batch)
                 losses = losses.at[-1,:-1].set(losses[-1,:-1] + loss)
-        
+
         # Evaluate
-        losses = losses.at[-1,:-1].set(losses[-1,:-1]/local_epochs/(b+1))
+        losses = losses.at[-1,:-1].set(losses[-1,:-1]/local_epochs/len(ds_train))    
         val_acc = reduce(lambda a,b: a+acc_fn(models, *b).mean(), ds_val, 0.)
         val_acc /= len(ds_val)
         losses = losses.at[-1, -1].set(val_acc)
