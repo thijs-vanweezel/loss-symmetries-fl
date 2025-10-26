@@ -4,6 +4,16 @@ from flax import nnx
 from functools import reduce
 from matplotlib import pyplot as plt
 plt.style.use("seaborn-v0_8-pastel")
+plt.rcParams.update({
+    "text.usetex": True,
+    "font.family": "serif",
+    "font.serif": ["Times"],
+    "font.sans-serif": ["Helvetica"],
+    "text.latex.preamble": r"""
+        \usepackage{amsmath, amssymb}
+        \usepackage{mathptmx}  % Safe fallback for Times + math
+    """
+})
 
 # Utils
 acc_fn = nnx.jit(nnx.vmap(lambda m,x,z,y: (m(x,z,train=False).argmax(-1)==y.argmax(-1)).mean(), in_axes=(None,0,0,0)))
