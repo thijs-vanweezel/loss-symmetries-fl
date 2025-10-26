@@ -54,7 +54,7 @@ def compute_surface(alpha_grid, beta_grid, pca, reconstruct, ds, acc_fn=acc_fn, 
         return errs, alpha_grid_fine, beta_grid_fine
     return errs
 
-def plot_trajectory(errs, model_idx, filename, epochs, reduced_params, alpha_grid, beta_grid, labels=True):
+def plot_trajectory(errs, model_idx, epochs, reduced_params, alpha_grid, beta_grid, filename, labels=True):
     # Plot
     fig, ax = plt.subplots(figsize=(6,6), dpi=300)
     fig.tight_layout()
