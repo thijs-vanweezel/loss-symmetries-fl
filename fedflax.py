@@ -6,6 +6,10 @@ from flax import nnx
 from functools import partial
 from tqdm.auto import tqdm
 
+def save(models, filename, n, overwrite):
+        with NpyAppendArray(filename, delete_if_exists=overwrite) as f:
+            f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(nnx.to_tree(models))], axis=1))
+
 # Parallelized train step
 def return_train_step(ell):
     @nnx.jit
@@ -60,9 +64,7 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs, filename=Non
         losses = jnp.concat([losses, jnp.zeros((1,n+1))])
         for epoch in range(local_epochs):
             # Collect and save params for visualization
-            if filename:
-                with NpyAppendArray(filename, delete_if_exists=True if epoch+r==0 else False) as f:
-                    f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(nnx.to_tree(models))], axis=1))
+            if filename: save(models, filename, n, overwrite=(r==0 and epoch==0))
             # Iterate over batches
             for b, (x_batch, z_batch, y_batch) in enumerate(tqdm(ds_train, leave=False, desc=f"Round {r} Epoch {epoch+1}/{local_epochs}")):
                 loss = train_step(models, model_g, opts, x_batch, z_batch, y_batch)
@@ -83,9 +85,7 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs, filename=Non
         else:
             patience = 1
     # Save final params
-    if filename:
-        with NpyAppendArray(filename) as f:
-            f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(nnx.to_tree(cast(model_g, n)))], axis=1))
+    if filename: save(cast(model_g, n), filename, n, overwrite=False)
 
     # Returns all kinds of output for the various analyses
     return updates, models
