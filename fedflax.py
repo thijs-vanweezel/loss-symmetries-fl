@@ -25,7 +25,7 @@ def return_train_step(ell):
 def get_updates(model_g, models):
     params = jax.tree.leaves(nnx.to_tree(models))
     params_g = jax.tree.leaves(nnx.to_tree(model_g))
-    return jax.tree.map(lambda pg, p: p-pg, params_g, params) # list of length n_layers with arrays of shape (n_clients, layer_shape)
+    return jax.tree.map(lambda pg, p: p-pg, params_g, params) # list of length n_layers with arrays of shape (n_clients, *layer_shape)
 
 def aggregate(model_g, updates):
     # Get model structure
@@ -60,6 +60,7 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs, filename=Non
         models = cast(model_g, n)
         if r==0:
             opts = nnx.vmap(opt_create)(models)
+        
         # Local training
         losses = jnp.concat([losses, jnp.zeros((1,n+1))])
         for epoch in range(local_epochs):
@@ -69,23 +70,27 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs, filename=Non
             for b, (x_batch, z_batch, y_batch) in enumerate(tqdm(ds_train, leave=False, desc=f"Round {r} Epoch {epoch+1}/{local_epochs}")):
                 loss = train_step(models, model_g, opts, x_batch, z_batch, y_batch)
                 losses = losses.at[-1,:-1].set(losses[-1,:-1] + loss)
+        
         # Evaluate
         losses = losses.at[-1,:-1].set(losses[-1,:-1]/local_epochs/(b+1))
         val_acc = reduce(lambda a,b: a+acc_fn(models, *b).mean(), ds_val, 0.)
         val_acc /= len(ds_val)
         losses = losses.at[-1, -1].set(val_acc)
         print(f"round {r} validation accuracy (mean over clients): {val_acc}")
+        
         # Aggregate
         updates = get_updates(model_g, models)
         model_g = aggregate(model_g, updates)
+        
         # Check if model is converged
         r += 1
         if r>1 and val_acc<=losses[-patience-1,-1]:
             patience += 1
         else:
             patience = 1
+    
     # Save final params
     if filename: save(cast(model_g, n), filename, n, overwrite=False)
 
-    # Returns all kinds of output for the various analyses
+    # Returns for the various analyses
     return updates, models
