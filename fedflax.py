@@ -11,7 +11,7 @@ def return_train_step(ell):
     @nnx.jit
     @nnx.vmap(in_axes=(0,None,0,0,0,0))
     def train_step(model, model_g, opt, x_batch, z_batch, y_batch):
-        (loss, (prox, ce)), grads = nnx.value_and_grad(partial(ell, train=True), has_aux=True)(model, model_g, x_batch, z_batch, y_batch)
+        loss, grads = nnx.value_and_grad(partial(ell, train=True))(model, model_g, x_batch, z_batch, y_batch)
         # grads = jax.tree.map(lambda g: g/2**15, grads) # assumes scaled loss for numerical stability with float16
         opt.update(grads)
         return loss
