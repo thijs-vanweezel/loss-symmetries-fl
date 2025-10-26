@@ -25,7 +25,7 @@ def get_reconstruct(model, client_dim=True):
         return nnx.from_tree(jax.tree.unflatten(struct, params))
     return reconstruct
 
-def compute_surface(alpha_grid, beta_grid, pca, reconstruct, ds, acc_fn=acc_fn):
+def compute_surface(alpha_grid, beta_grid, pca, reconstruct, ds, acc_fn=acc_fn, interpolate=True):
     errs = jnp.zeros((len(alpha_grid), len(beta_grid)))
     for i, alpha_ in enumerate(alpha_grid):
         for j, beta_ in enumerate(beta_grid):
@@ -35,42 +35,32 @@ def compute_surface(alpha_grid, beta_grid, pca, reconstruct, ds, acc_fn=acc_fn):
             # Compute accuracy
             acc = reduce(lambda acc, b: acc + acc_fn(model,*b), ds, 0.) / len(ds)
             errs = errs.at[i,j].set(1-acc.mean()) # mean over clients' data, i.e., global data error rate
+    
+    if interpolate:
+        alpha_grid_fine = np.linspace(alpha_grid.min(), alpha_grid.max(), 1000)
+        beta_grid_fine = np.linspace(beta_grid.min(), beta_grid.max(), 1000)
+        mesh = np.meshgrid(alpha_grid_fine, beta_grid_fine)
+        errs = scipy.interpolate.interpn((alpha_grid, beta_grid), errs, np.vstack([mesh[0].ravel(), mesh[1].ravel()]).T, method='cubic').reshape(1000,1000)
+        return errs, alpha_grid_fine, beta_grid_fine
     return errs
 
-def plot_trajectory(pca, model_idx, ds, reconstruct, filename, epochs, reduced_params=None, all_params=None, beta_min=None, alpha_min=None, alpha_max=None, beta_max=None, points=30, levels=15, type="density", labels=True, errs=None):
-    if reduced_params is None:
-        # Perform pca
-        reduced_params = pca.transform(all_params)
-
-    # Define grid
-    alpha_min = alpha_min or reduced_params[:,0].min()-.1
-    alpha_max = alpha_max or reduced_params[:,0].max()+.1
-    alpha_grid = jnp.linspace(alpha_min, alpha_max, points)
-    beta_min = beta_min or reduced_params[:,1].min()-.1
-    beta_max = beta_max or reduced_params[:,1].max()+.1
-    beta_grid = jnp.linspace(beta_min, beta_max, points)
-    # For sampled points on the 2d plane, compute the accuracy
-    errs = errs or compute_surface(alpha_grid, beta_grid, pca, reconstruct, ds)
-
+def plot_trajectory(errs, model_idx, filename, epochs, reduced_params, alpha_grid, beta_grid, labels=True):
     # Plot
     fig, ax = plt.subplots(figsize=(6,6), dpi=300)
     fig.tight_layout()
     ax.set_box_aspect(1)
     # Plot the level sets, exponential scale
     norm = mpl.colors.Normalize(vmin=.5, vmax=1.) # TODO: 0.5 error is pretty bad
-    alpha_grid_fine = np.linspace(alpha_grid.min(), alpha_grid.max(), 1000) # using alpha_min and alpha_max directly causes issues with pcolormesh
-    beta_grid_fine = np.linspace(beta_grid.min(), beta_grid.max(), 1000)
-    mesh = np.meshgrid(alpha_grid_fine, beta_grid_fine)
     plot = ax.pcolormesh(
-        alpha_grid_fine,
-        beta_grid_fine,
-        scipy.interpolate.interpn((alpha_grid, beta_grid), errs, np.vstack([mesh[0].ravel(), mesh[1].ravel()]).T, method='cubic').reshape(1000,1000),
+        alpha_grid,
+        beta_grid,
+        errs,
         shading="auto",
-        cmap="cividis", # summer is not perceptually uniform, magma has more than two colors
+        cmap="cividis",
         norm=norm,
     )
     if labels:
-        bar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=plot.cmap), ax=ax, shrink=0.8, ticks=None if type=="density"else plot.levels)
+        bar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=plot.cmap), ax=ax, shrink=0.8, ticks=None)
         bar.set_label("Accuracy")
     # Plot the model paths (assume params are sorted by optimization step)
     for i in jnp.unique(model_idx):
@@ -89,5 +79,3 @@ def plot_trajectory(pca, model_idx, ds, reconstruct, filename, epochs, reduced_p
     plt.xticks([])
     plt.yticks([])
     fig.savefig(filename)
-
-    return errs
