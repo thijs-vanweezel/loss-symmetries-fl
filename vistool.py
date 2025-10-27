@@ -60,7 +60,7 @@ def plot_trajectory(errs, model_idx, epochs, reduced_params, alpha_grid, beta_gr
     fig.tight_layout()
     ax.set_box_aspect(1)
     # Plot the level sets, exponential scale
-    norm = mpl.colors.Normalize(vmin=.5, vmax=1.) # TODO: 0.5 error is pretty bad
+    norm = mpl.colors.Normalize(vmin=.5, vmax=.8) # TODO: 0.5 error is pretty bad
     plot = ax.pcolormesh(
         alpha_grid,
         beta_grid,
@@ -79,8 +79,10 @@ def plot_trajectory(errs, model_idx, epochs, reduced_params, alpha_grid, beta_gr
         ax.plot(reduced_params[idx,0], reduced_params[idx,1], c=f"C{i.item()+1}", label=f"Client {i.item()}", lw=1)
         # Color uniformly at aggregation points
         colors = [f"C{c.item()}" for c in jnp.array([i+1]*len(idx))*(1-jnp.maximum(1-jnp.arange(len(idx))%epochs, 0))]
+        # Circle initial model
+        linewidths = [1.]+[0.]*(len(idx)-1)
         # Points
-        ax.scatter(reduced_params[idx,0], reduced_params[idx,1], c=colors, s=10)
+        ax.scatter(reduced_params[idx,0], reduced_params[idx,1], c=colors, s=10, linewidths=linewidths, edgecolors="k")
     # Show
     if labels:
         handles, labels = ax.get_legend_handles_labels()
