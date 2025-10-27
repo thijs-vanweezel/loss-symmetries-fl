@@ -83,6 +83,10 @@ def plot_trajectory(errs, model_idx, epochs, reduced_params, alpha_grid, beta_gr
         linewidths = [1.]+[0.]*(len(idx)-1)
         # Points
         ax.scatter(reduced_params[idx,0], reduced_params[idx,1], c=colors, s=10, linewidths=linewidths, edgecolors="k")
+    # Display accuracy of final aggregated model
+    aggr_coords = reduced_params[-1]
+    aggr_coords_discrete = jnp.argmin(jnp.abs(alpha_grid - aggr_coords[0])), jnp.argmin(jnp.abs(beta_grid - aggr_coords[1]))
+    ax.annotate(f"{int(errs[aggr_coords_discrete]*100.)}\%", xy=aggr_coords, c="k")
     # Show
     if labels:
         handles, labels = ax.get_legend_handles_labels()
