@@ -11,7 +11,7 @@ plt.rcParams.update({
     "font.sans-serif": ["Helvetica"],
     "text.latex.preamble": r"""
         \usepackage{amsmath, amssymb}
-        \usepackage{mathptmx}  % Safe fallback for Times + math
+        \usepackage{mathptmx}
     """
 })
 
@@ -66,7 +66,7 @@ def plot_trajectory(errs, model_idx, epochs, reduced_params, alpha_grid, beta_gr
         beta_grid,
         errs,
         shading="auto",
-        cmap="cividis",
+        cmap="inferno",
         norm=norm,
     )
     if labels:
