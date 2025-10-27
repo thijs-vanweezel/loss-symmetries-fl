@@ -80,9 +80,10 @@ def plot_trajectory(errs, model_idx, epochs, reduced_params, alpha_grid, beta_gr
         # Color uniformly at aggregation points
         colors = [f"C{c.item()}" for c in jnp.array([i+1]*len(idx))*(1-jnp.maximum(1-jnp.arange(len(idx))%epochs, 0))]
         # Circle initial model
-        linewidths = [1.]+[0.]*(len(idx)-1)
+        linewidths = [2.]+[0.]*(len(idx)-1)
+        sizes = [30.]+[10.]*(len(idx)-1)
         # Points
-        ax.scatter(reduced_params[idx,0], reduced_params[idx,1], c=colors, s=10, linewidths=linewidths, edgecolors="k")
+        ax.scatter(reduced_params[idx,0], reduced_params[idx,1], c=colors, s=sizes, linewidths=linewidths, edgecolors="k")
     # Display accuracy of final aggregated model
     aggr_coords = reduced_params[-1]
     aggr_coords_discrete = jnp.argmin(jnp.abs(alpha_grid - aggr_coords[0])), jnp.argmin(jnp.abs(beta_grid - aggr_coords[1]))
