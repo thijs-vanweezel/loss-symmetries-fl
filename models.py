@@ -108,7 +108,7 @@ class LeNet(nnx.Module):
         super().__init__()
         self.conv1 = nnx.Conv(1, 8, (4,4), rngs=key, padding="VALID")
         self.conv2 = nnx.Conv(8, 16, (4,4), rngs=key, padding="VALID")
-        self.fc1 = nnx.Linear(15*27*16+3, 128, rngs=key) # 6*12*16 if no dimension expansion is applied to data
+        self.fc1 = nnx.Linear(6*12*16+3, 128, rngs=key) # 6*12 w/o dim exp, 15*27 w/ dim exp
         self.fc2 = nnx.Linear(128, 64, rngs=key)
         self.fc3 = nnx.Linear(64, 16, rngs=key)
     def __call__(self, x, z, train=None):
