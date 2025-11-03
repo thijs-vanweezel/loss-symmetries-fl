@@ -11,13 +11,22 @@ def save(models, filename, n, overwrite):
             f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(nnx.to_tree(models))], axis=1))
 
 # Parallelized train step
-def return_train_step(ell):
+def return_train_step(ell, p_mask):
     @nnx.jit
     @nnx.vmap(in_axes=(0,None,0,0,0,0))
     def train_step(model, model_g, opt, x_batch, z_batch, y_batch):
-        loss, grads = nnx.value_and_grad(partial(ell, train=True))(model, model_g, x_batch, z_batch, y_batch)
-        # grads = jax.tree.map(lambda g: g/2**15, grads) # assumes scaled loss for numerical stability with float16
-        opt.update(grads)
+        # Compute gradient
+        loss, grad = nnx.value_and_grad(partial(ell, train=True))(model, model_g, x_batch, z_batch, y_batch)
+        # Apply deterministic random mask to gradients if desired
+        key = jax.random.key(0)
+        def rand_bool(shape):
+            nonlocal key
+            _, key = jax.random.split(key)
+            return jax.random.bernoulli(key, p_mask, shape)
+        mask = jax.tree.map(lambda p: rand_bool(p.shape), grad)
+        grad = jax.tree.map(lambda m, g: jnp.where(m, g, 0.), mask, grad)
+        # Apply gradient
+        opt.update(grad)
         return loss
     return train_step
 
@@ -45,9 +54,9 @@ def cast(model_g, n):
     models = nnx.from_tree(jax.tree.unflatten(struct, params_all))
     return models
 
-def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs, filename=None, n=4, max_patience=None, rounds=None):
+def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs, filename=None, n=4, max_patience=None, rounds=None, p_mask=1.):
     # Parallelize train step
-    train_step = return_train_step(ell)
+    train_step = return_train_step(ell, p_mask)
     # Acc function that can be used as stand-alone
     acc_fn = nnx.jit(nnx.vmap(lambda m,x,z,y: (m(x,z,train=False).argmax(-1)==y.argmax(-1)).mean()))
 
