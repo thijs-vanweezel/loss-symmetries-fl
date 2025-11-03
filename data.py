@@ -36,7 +36,8 @@ def preprocess(original_path="MPIIGaze/MPIIGaze/Data/Normalized"):
                 os.remove(f"MPIIGaze_preprocessed/{split}/{person}/{mat}")
 
 class MPIIGaze(Dataset):
-    def __init__(self, path:str, n_clients:int):
+    def __init__(self, path:str, n_clients:int, transform):
+        self.transform = transform
         self.n_clients = n_clients
         g = os.walk(path)
         self.clients = next(g)[1][:n_clients]
@@ -54,10 +55,14 @@ class MPIIGaze(Dataset):
         # Notice that the data is sorted per participant, which are interleaved here
         client = self.clients[idx%self.n_clients] 
         i = idx//self.n_clients
+        # Load
         img, aux, label = torch.load(self.files[client][i])
+        # Flip if right eye
         img = img if self.files[client][i].endswith("left.pt") else torch.flip(img, [1])
+        img = self.transform(img)
+        # Process label into one of 16 regions
         label = torch.asarray([torch.arcsin(-label[1]), torch.arctan2(-label[0], -label[2])]) # polar coordinates
-        regions = torch.concat([ # TODO: is there a better way to create quadrants?
+        regions = torch.concat([
             torch.cartesian_prod(torch.linspace(-0.3675091, 0.0831264, 4), torch.linspace(-0.31378174, 0.38604215, 4)[:2]),
             torch.cartesian_prod(torch.linspace(-0.3675091, 0.0831264, 4), torch.linspace(-0.31378174, 0.38604215, 4)[2:])
         ]) # mins and maxs of training set
@@ -111,18 +116,18 @@ def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.nda
 
     return jnp.stack(clients_imgs, 0), jnp.stack(clients_auxs, 0), jnp.stack(clients_labels, 0)
 
-def get_gaze(skew:str="feature", batch_size=128, n_clients=4, beta:float=0, path="MPIIGaze_preprocessed", partition="train", **kwargs)->DataLoader:
+def get_gaze(skew:str="feature", batch_size=128, n_clients=4, beta:float=0, path="MPIIGaze_preprocessed", partition="train", transform=lambda x:x, **kwargs)->DataLoader:
     assert skew in ["feature", "overlap", "label"], "Skew must be one of 'feature', 'overlap', or 'label'. For no skew, specify beta=0."
     assert beta>=0 and beta<=1, "Beta must be between 0 and 1"
     beta = 1-beta if skew=="overlap" else beta
     # Fractions derived
-    n_indiv = int(batch_size*beta) # TODO: this doesn't account for the 1/nth in n_shared that is also an individual client's data. Then again, should it?
+    n_indiv = int(batch_size*beta)
     n_shared = batch_size-n_indiv 
     new_batch_size = n_indiv*n_clients + n_shared
     indiv_frac = n_indiv / new_batch_size
     # Iterable batches
     return DataLoader(
-        MPIIGaze(n_clients=n_clients, path=os.path.join(path, partition)),
+        MPIIGaze(n_clients=n_clients, path=os.path.join(path, partition), transform=transform),
         batch_size=new_batch_size,
         collate_fn=partial(jax_collate, n_clients=n_clients, indiv_frac=indiv_frac, skew=skew),
         shuffle=False,
