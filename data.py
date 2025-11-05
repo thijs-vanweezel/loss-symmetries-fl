@@ -36,8 +36,7 @@ def preprocess(original_path="MPIIGaze/MPIIGaze/Data/Normalized"):
                 os.remove(f"MPIIGaze_preprocessed/{split}/{person}/{mat}")
 
 class MPIIGaze(Dataset):
-    def __init__(self, path:str, n_clients:int, transform):
-        self.transform = transform
+    def __init__(self, path:str, n_clients:int):
         self.n_clients = n_clients
         g = os.walk(path)
         self.clients = next(g)[1][:n_clients]
@@ -59,7 +58,6 @@ class MPIIGaze(Dataset):
         img, aux, label = torch.load(self.files[client][i])
         # Flip if right eye
         img = img if self.files[client][i].endswith("left.pt") else torch.flip(img, [1])
-        img = self.transform(img)
         # Process label into one of 16 regions
         label = torch.asarray([torch.arcsin(-label[1]), torch.arctan2(-label[0], -label[2])]) # polar coordinates
         regions = torch.concat([
@@ -116,7 +114,7 @@ def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.nda
 
     return jnp.stack(clients_imgs, 0), jnp.stack(clients_auxs, 0), jnp.stack(clients_labels, 0)
 
-def get_gaze(skew:str="feature", batch_size=128, n_clients=4, beta:float=0, path="MPIIGaze_preprocessed", partition="train", transform=lambda x:x, **kwargs)->DataLoader:
+def get_gaze(skew:str="feature", batch_size=128, n_clients=4, beta:float=0, path="MPIIGaze_preprocessed", partition="train", **kwargs)->DataLoader:
     assert skew in ["feature", "overlap", "label"], "Skew must be one of 'feature', 'overlap', or 'label'. For no skew, specify beta=0."
     assert beta>=0 and beta<=1, "Beta must be between 0 and 1"
     beta = 1-beta if skew=="overlap" else beta
@@ -127,7 +125,7 @@ def get_gaze(skew:str="feature", batch_size=128, n_clients=4, beta:float=0, path
     indiv_frac = n_indiv / new_batch_size
     # Iterable batches
     return DataLoader(
-        MPIIGaze(n_clients=n_clients, path=os.path.join(path, partition), transform=transform),
+        MPIIGaze(n_clients=n_clients, path=os.path.join(path, partition)),
         batch_size=new_batch_size,
         collate_fn=partial(jax_collate, n_clients=n_clients, indiv_frac=indiv_frac, skew=skew),
         shuffle=False,
