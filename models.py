@@ -161,34 +161,28 @@ def teleport_lenet(model, key, tau_range=.1):
 class WAsymLeNet(nnx.Module):
     def __init__(self, key:jax._src.prng.PRNGKeyArray, pfix=.75):
         super().__init__()
-        keys = jax.random.split(key, 15)
+        keys = jax.random.split(key, 5)
+        _, *self.keys = jax.random.split(keys[-1], 6)
+        self.pfix = pfix
 
         self.conv1 = nnx.Conv(1, 8, (4,4), rngs=nnx.Rngs(keys[0]), padding="VALID")
-        self.convm1 = jax.random.bernoulli(keys[1], p=pfix, shape=(4,4,1,8)).astype(jnp.float32)
-        self.convf1 = jax.random.normal(keys[2], (4,4,1,8))
+        self.conv2 = nnx.Conv(8, 16, (4,4), rngs=nnx.Rngs(keys[1]), padding="VALID")
+        self.fc1 = nnx.Linear(6*12*16+3, 128, rngs=nnx.Rngs(keys[2]))
+        self.fc2 = nnx.Linear(128, 64, rngs=nnx.Rngs(keys[3]))
+        self.fc3 = nnx.Linear(64, 16, rngs=nnx.Rngs(keys[4]))
 
-        self.conv2 = nnx.Conv(8, 16, (4,4), rngs=nnx.Rngs(keys[3]), padding="VALID")
-        self.convm2 = jax.random.bernoulli(keys[4], p=pfix, shape=(4,4,8,16)).astype(jnp.float32)
-        self.convf2 = jax.random.normal(keys[5], (4,4,8,16))
-
-        self.fc1 = nnx.Linear(6*12*16+3, 128, rngs=nnx.Rngs(keys[6]))
-        self.fcm1 = jax.random.bernoulli(keys[7], p=pfix, shape=(6*12*16+3, 128)).astype(jnp.float32)
-        self.fcf1 = jax.random.normal(keys[8], (6*12*16+3, 128))
-
-        self.fc2 = nnx.Linear(128, 64, rngs=nnx.Rngs(keys[9]))
-        self.fcm2 = jax.random.bernoulli(keys[10], p=pfix, shape=(128, 64)).astype(jnp.float32)
-        self.fcf2 = jax.random.normal(keys[11], (128, 64))
-
-        self.fc3 = nnx.Linear(64, 16, rngs=nnx.Rngs(keys[12]))
-        self.fcm3 = jax.random.bernoulli(keys[13], p=pfix, shape=(64, 16)).astype(jnp.float32)
-        self.fcf3 = jax.random.normal(keys[14], (64, 16))
+    def mask_kernel(self, kernel, key):
+        key1, key2 = jax.random.split(key) # Note: the masks and values are deterministic
+        mask = jax.random.bernoulli(key1, p=self.pfix, shape=kernel.shape).astype(jnp.float32)
+        kernel = kernel * mask + (1-mask) * jax.random.normal(key2, kernel.shape)
+        return kernel
 
     def mask(self):
-        # self.conv1.kernel.value = self.conv1.kernel.value * self.convm1 + (1-self.convm1) * self.convf1
-        # self.conv2.kernel.value = self.conv2.kernel.value * self.convm2 + (1-self.convm2) * self.convf2
-        self.fc1.kernel.value = self.fc1.kernel.value * self.fcm1 + (1-self.fcm1) * self.fcf1
-        self.fc2.kernel.value = self.fc2.kernel.value * self.fcm2 + (1-self.fcm2) * self.fcf2
-        self.fc3.kernel.value = self.fc3.kernel.value * self.fcm3 + (1-self.fcm3) * self.fcf3
+        # self.conv1.kernel.value = self.mask_kernel(self.conv1.kernel.value, self.keys[0])
+        # self.conv2.kernel.value = self.mask_kernel(self.conv2.kernel.value, self.keys[1])
+        self.fc1.kernel.value = self.mask_kernel(self.fc1.kernel.value, self.keys[2])
+        self.fc2.kernel.value = self.mask_kernel(self.fc2.kernel.value, self.keys[3])
+        self.fc3.kernel.value = self.mask_kernel(self.fc3.kernel.value, self.keys[4])
 
     def __call__(self, x, z, train=None):
         self.mask()
