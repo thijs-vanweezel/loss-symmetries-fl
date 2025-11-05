@@ -8,7 +8,7 @@ from tqdm.auto import tqdm
 
 def save(models, filename, n, overwrite):
         with NpyAppendArray(filename, delete_if_exists=overwrite) as f:
-            f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(nnx.to_tree(models))], axis=1))
+            f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(nnx.split(models, nnx.Param, ...)[1])], axis=1))
 
 # Parallelized train step
 def return_train_step(ell):
@@ -22,19 +22,19 @@ def return_train_step(ell):
 
 # Get updates, i.e., difference between initial model and locally converged models
 def get_updates(model_g, models):
-    params = jax.tree.leaves(nnx.to_tree(models))
-    params_g = jax.tree.leaves(nnx.to_tree(model_g))
-    return jax.tree.map(lambda pg, p: p-pg, params_g, params) # list of length n_layers with arrays of shape (n_clients, *layer_shape)
+    params = nnx.split(models, nnx.Param, ...)[1]
+    params_g = nnx.split(model_g, nnx.Param, ...)[1]
+    return jax.tree.map(lambda pg, p: p-pg, params_g, params) # state of length n_layers with arrays of shape (n_clients, *layer_shape)
 
 def aggregate(model_g, updates):
     # Get model structure
-    params_g, struct = jax.tree.flatten(nnx.to_tree(model_g))
+    struct, params_g, rest = nnx.split(model_g, nnx.Param, ...)
     # Average updates
     update = jax.tree.map(lambda x: jnp.mean(x, axis=0), updates)
     # Apply to global model
     params_g = jax.tree.map(lambda pg, u: pg + u, params_g, update)
     # Convert to model
-    model_g = nnx.from_tree(jax.tree.unflatten(struct, params_g))
+    model_g = nnx.merge(struct, params_g, rest)
     return model_g
 
 # Broadcast global model to clients
@@ -79,6 +79,8 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs, filename=Non
         print(f"round {r} validation accuracy (mean over clients): {val_acc}")
         
         # Aggregate
+        globals()["model_g"] = model_g  # For debugging
+        globals()["models"] = models  # For debugging
         updates = get_updates(model_g, models)
         model_g = aggregate(model_g, updates)
         
