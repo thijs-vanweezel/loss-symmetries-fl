@@ -127,6 +127,85 @@ class LeNet(nnx.Module):
         x = self.fc3(x)
         return x
 
+# Dimension expansion
+@jax.vmap
+def interleave(img):
+    img = jnp.repeat(img, 2, axis=0)
+    img = jnp.repeat(img, 2, axis=1)
+    img = img.at[::2].set(.5)
+    img = img.at[:, ::2].set(.5)
+    return img
+# LeNet, adjusted for expanded images
+class DimExpLeNet(nnx.Module):
+    def __init__(self, key):
+        super().__init__()
+        self.conv1 = nnx.Conv(1, 8, (4,4), rngs=key, padding="VALID")
+        self.conv2 = nnx.Conv(8, 16, (4,4), rngs=key, padding="VALID")
+        self.fc1 = nnx.Linear(15*27*16+3, 128, rngs=key)
+        self.fc2 = nnx.Linear(128, 64, rngs=key)
+        self.fc3 = nnx.Linear(64, 16, rngs=key)
+    
+    def __call__(self, x, z, train=None):
+        x = interleave(x)
+        x = self.conv1(x)
+        x = nnx.relu(x)
+        x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
+        x = self.conv2(x)
+        x = nnx.relu(x)
+        x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
+        x = jnp.reshape(x, (x.shape[0], -1))
+        x = jnp.concatenate([x, z], axis=-1)
+        x = self.fc1(x)
+        x = nnx.relu(x)
+        x = self.fc2(x)
+        x = nnx.relu(x)
+        x = self.fc3(x)
+        return x
+
+# LeNet with some specifically fixed weights
+class WAsymLeNet(nnx.Module):
+    def __init__(self, key:jax._src.prng.PRNGKeyArray, pfix=.75):
+        super().__init__()
+        keys = jax.random.split(key, 5)
+        _, *self.keys = jax.random.split(keys[-1], 6)
+        self.pfix = pfix
+
+        self.conv1 = nnx.Conv(1, 8, (4,4), rngs=nnx.Rngs(keys[0]), padding="VALID")
+        self.conv2 = nnx.Conv(8, 16, (4,4), rngs=nnx.Rngs(keys[1]), padding="VALID")
+        self.fc1 = nnx.Linear(6*12*16+3, 128, rngs=nnx.Rngs(keys[2]))
+        self.fc2 = nnx.Linear(128, 64, rngs=nnx.Rngs(keys[3]))
+        self.fc3 = nnx.Linear(64, 16, rngs=nnx.Rngs(keys[4]))
+
+    def mask_kernel(self, kernel, key):
+        key1, key2 = jax.random.split(key) # Note: the masks and values are deterministic
+        mask = jax.random.bernoulli(key1, p=self.pfix, shape=kernel.shape).astype(jnp.float32)
+        kernel = kernel * mask + (1-mask) * jax.random.normal(key2, kernel.shape)
+        return kernel
+
+    def mask(self):
+        self.conv1.kernel.value = self.mask_kernel(self.conv1.kernel.value, self.keys[0])
+        self.conv2.kernel.value = self.mask_kernel(self.conv2.kernel.value, self.keys[1])
+        self.fc1.kernel.value = self.mask_kernel(self.fc1.kernel.value, self.keys[2])
+        self.fc2.kernel.value = self.mask_kernel(self.fc2.kernel.value, self.keys[3])
+        self.fc3.kernel.value = self.mask_kernel(self.fc3.kernel.value, self.keys[4])
+
+    def __call__(self, x, z, train=None):
+        self.mask()
+        x = self.conv1(x)
+        x = nnx.relu(x)
+        x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
+        x = self.conv2(x)
+        x = nnx.relu(x)
+        x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
+        x = jnp.reshape(x, (x.shape[0], -1))
+        x = jnp.concatenate([x, z], axis=-1)
+        x = self.fc1(x)
+        x = nnx.relu(x)
+        x = self.fc2(x)
+        x = nnx.relu(x)
+        x = self.fc3(x)
+        return x
+    
 def teleport_lenet(model, key, tau_range=.1):
     assert isinstance(model, LeNet), "Teleportation must be (slightly) adjusted for models other than LeNet-5"
     # Extract params
@@ -156,47 +235,3 @@ def teleport_lenet(model, key, tau_range=.1):
     params_tele = jax.tree.map(lambda p, c: c*p, params, coefs)
     # Rebuild the model
     return nnx.from_tree(jax.tree.unflatten(struct, params_tele))
-
-# LeNet-5 for 36X60 images + 3 auxiliary features
-class WAsymLeNet(nnx.Module):
-    def __init__(self, key:jax._src.prng.PRNGKeyArray, pfix=.75):
-        super().__init__()
-        keys = jax.random.split(key, 5)
-        _, *self.keys = jax.random.split(keys[-1], 6)
-        self.pfix = pfix
-
-        self.conv1 = nnx.Conv(1, 8, (4,4), rngs=nnx.Rngs(keys[0]), padding="VALID")
-        self.conv2 = nnx.Conv(8, 16, (4,4), rngs=nnx.Rngs(keys[1]), padding="VALID")
-        self.fc1 = nnx.Linear(6*12*16+3, 128, rngs=nnx.Rngs(keys[2]))
-        self.fc2 = nnx.Linear(128, 64, rngs=nnx.Rngs(keys[3]))
-        self.fc3 = nnx.Linear(64, 16, rngs=nnx.Rngs(keys[4]))
-
-    def mask_kernel(self, kernel, key):
-        key1, key2 = jax.random.split(key) # Note: the masks and values are deterministic
-        mask = jax.random.bernoulli(key1, p=self.pfix, shape=kernel.shape).astype(jnp.float32)
-        kernel = kernel * mask + (1-mask) * jax.random.normal(key2, kernel.shape)
-        return kernel
-
-    def mask(self):
-        # self.conv1.kernel.value = self.mask_kernel(self.conv1.kernel.value, self.keys[0])
-        # self.conv2.kernel.value = self.mask_kernel(self.conv2.kernel.value, self.keys[1])
-        self.fc1.kernel.value = self.mask_kernel(self.fc1.kernel.value, self.keys[2])
-        self.fc2.kernel.value = self.mask_kernel(self.fc2.kernel.value, self.keys[3])
-        self.fc3.kernel.value = self.mask_kernel(self.fc3.kernel.value, self.keys[4])
-
-    def __call__(self, x, z, train=None):
-        self.mask()
-        x = self.conv1(x)
-        x = nnx.relu(x)
-        x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
-        x = self.conv2(x)
-        x = nnx.relu(x)
-        x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
-        x = jnp.reshape(x, (x.shape[0], -1))
-        x = jnp.concatenate([x, z], axis=-1)
-        x = self.fc1(x)
-        x = nnx.relu(x)
-        x = self.fc2(x)
-        x = nnx.relu(x)
-        x = self.fc3(x)
-        return x
