@@ -1,7 +1,8 @@
 from flax import nnx
 from jax import numpy as jnp
 from itertools import chain
-import jax
+from functools import partial
+import jax, re
 
 # Simple model
 class Simple8x8to10(nnx.Module):
@@ -102,31 +103,6 @@ class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
         x = self.fc(jnp.concatenate([x, z], axis=-1))
         return x
     
-# LeNet-5 for 36X60 images + 3 auxiliary features
-class LeNet(nnx.Module):
-    def __init__(self, key):
-        super().__init__()
-        self.conv1 = nnx.Conv(1, 8, (4,4), rngs=key, padding="VALID")
-        self.conv2 = nnx.Conv(8, 16, (4,4), rngs=key, padding="VALID")
-        self.fc1 = nnx.Linear(6*12*16+3, 128, rngs=key) # 6*12 w/o dim exp, 15*27 w/ dim exp
-        self.fc2 = nnx.Linear(128, 64, rngs=key)
-        self.fc3 = nnx.Linear(64, 16, rngs=key)
-    def __call__(self, x, z, train=None):
-        x = self.conv1(x)
-        x = nnx.relu(x)
-        x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
-        x = self.conv2(x)
-        x = nnx.relu(x)
-        x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
-        x = jnp.reshape(x, (x.shape[0], -1))
-        x = jnp.concatenate([x, z], axis=-1)
-        x = self.fc1(x)
-        x = nnx.relu(x)
-        x = self.fc2(x)
-        x = nnx.relu(x)
-        x = self.fc3(x)
-        return x
-
 # Dimension expansion
 @jax.vmap
 def interleave(img):
@@ -135,18 +111,50 @@ def interleave(img):
     img = img.at[::2].set(.5)
     img = img.at[:, ::2].set(.5)
     return img
-# LeNet, adjusted for expanded images
-class DimExpLeNet(nnx.Module):
-    def __init__(self, key):
+
+# W-Asymmetry masking
+def make_wasym(model, pfix, key):
+    def mask_leaf(kernel, layer_type="fc"):
+        # Note: the masks and values are deterministic, given the same key
+        nonlocal key
+        subkey, key = jax.random.split(key) 
+        # Mask entire filters if conv
+        mask_shape = kernel.shape if layer_type=="fc" else kernel.shape[-1]
+        # Replace masked weights with random values
+        mask = jax.random.bernoulli(key, p=pfix, shape=mask_shape).astype(jnp.float32)
+        kernel = kernel * mask + (1-mask) * jax.random.normal(subkey, kernel.shape)*0
+        return kernel
+    # Apply to each layer
+    struct, fc, conv, rest = nnx.split(
+        model, 
+        nnx.All(lambda path, x: any(re.compile(r"^fc.$").match(segment) for segment in path), nnx.PathContains("kernel")), 
+        nnx.All(lambda path, x: any(re.compile(r"^conv.$").match(segment) for segment in path), nnx.PathContains("kernel")),
+        ...)
+    fc = jax.tree.map(mask_leaf, fc)
+    conv = jax.tree.map(partial(mask_leaf, layer_type="conv"), conv)
+    return nnx.merge(struct, fc, conv, rest)
+
+# LeNet-5 for 36X60 images + 3 auxiliary features
+class LeNet(nnx.Module):
+    def __init__(self, key, dimexp=False, pfix=1.0, mask_key=None):
         super().__init__()
+        # Asymmetry params
+        flat_shape = 15*27*16 if dimexp else 6*12*16
+        self.dimexp = dimexp
+        self.mask_key = mask_key
+        self.pfix = pfix
+        # Layers
         self.conv1 = nnx.Conv(1, 8, (4,4), rngs=key, padding="VALID")
         self.conv2 = nnx.Conv(8, 16, (4,4), rngs=key, padding="VALID")
-        self.fc1 = nnx.Linear(15*27*16+3, 128, rngs=key)
+        self.fc1 = nnx.Linear(flat_shape+3, 128, rngs=key)
         self.fc2 = nnx.Linear(128, 64, rngs=key)
         self.fc3 = nnx.Linear(64, 16, rngs=key)
     
     def __call__(self, x, z, train=None):
-        x = interleave(x)
+        # Apply asymmetries
+        x = x if not self.dimexp else interleave(x)
+        self = self if self.pfix==1. else make_wasym(self, pfix=self.pfix, key=self.mask_key)
+        # Forward pass
         x = self.conv1(x)
         x = nnx.relu(x)
         x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
@@ -162,50 +170,6 @@ class DimExpLeNet(nnx.Module):
         x = self.fc3(x)
         return x
 
-# LeNet with some specifically fixed weights
-class WAsymLeNet(nnx.Module):
-    def __init__(self, key:jax._src.prng.PRNGKeyArray, pfix=.75):
-        super().__init__()
-        keys = jax.random.split(key, 5)
-        _, *self.keys = jax.random.split(keys[-1], 6)
-        self.pfix = pfix
-
-        self.conv1 = nnx.Conv(1, 8, (4,4), rngs=nnx.Rngs(keys[0]), padding="VALID")
-        self.conv2 = nnx.Conv(8, 16, (4,4), rngs=nnx.Rngs(keys[1]), padding="VALID")
-        self.fc1 = nnx.Linear(6*12*16+3, 128, rngs=nnx.Rngs(keys[2]))
-        self.fc2 = nnx.Linear(128, 64, rngs=nnx.Rngs(keys[3]))
-        self.fc3 = nnx.Linear(64, 16, rngs=nnx.Rngs(keys[4]))
-
-    def mask_kernel(self, kernel, key):
-        key1, key2 = jax.random.split(key) # Note: the masks and values are deterministic
-        mask = jax.random.bernoulli(key1, p=self.pfix, shape=kernel.shape).astype(jnp.float32)
-        kernel = kernel * mask + (1-mask) * jax.random.normal(key2, kernel.shape)
-        return kernel
-
-    def mask(self):
-        self.conv1.kernel.value = self.mask_kernel(self.conv1.kernel.value, self.keys[0])
-        self.conv2.kernel.value = self.mask_kernel(self.conv2.kernel.value, self.keys[1])
-        self.fc1.kernel.value = self.mask_kernel(self.fc1.kernel.value, self.keys[2])
-        self.fc2.kernel.value = self.mask_kernel(self.fc2.kernel.value, self.keys[3])
-        self.fc3.kernel.value = self.mask_kernel(self.fc3.kernel.value, self.keys[4])
-
-    def __call__(self, x, z, train=None):
-        self.mask()
-        x = self.conv1(x)
-        x = nnx.relu(x)
-        x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
-        x = self.conv2(x)
-        x = nnx.relu(x)
-        x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
-        x = jnp.reshape(x, (x.shape[0], -1))
-        x = jnp.concatenate([x, z], axis=-1)
-        x = self.fc1(x)
-        x = nnx.relu(x)
-        x = self.fc2(x)
-        x = nnx.relu(x)
-        x = self.fc3(x)
-        return x
-    
 def teleport_lenet(model, key, tau_range=.1):
     assert isinstance(model, LeNet), "Teleportation must be (slightly) adjusted for models other than LeNet-5"
     # Extract params
