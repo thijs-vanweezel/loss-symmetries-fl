@@ -79,8 +79,6 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs, filename=Non
         print(f"round {r} validation accuracy (mean over clients): {val_acc}")
         
         # Aggregate
-        globals()["model_g"] = model_g  # For debugging
-        globals()["models"] = models  # For debugging
         updates = get_updates(model_g, models)
         model_g = aggregate(model_g, updates)
         
