@@ -2,7 +2,7 @@ from flax import nnx
 from jax import numpy as jnp
 from itertools import chain
 from functools import partial
-import jax, re
+import jax
 
 # Used in resnet
 class ResNetBlock(nnx.Module):
@@ -45,8 +45,13 @@ class ResNetBlock(nnx.Module):
 
 # Resnet for ImageNet ([3,4,6,3] for 34 layers, [2,2,2,2] for 18 layers)
 class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
-    def __init__(self, key:nnx.RngKey, block=ResNetBlock, layers=[2,2,2,2], kernels=[64,128,256,512], channels_in=1, dim_out=16, **kwargs):
+    def __init__(self, key:nnx.RngKey, block=ResNetBlock, layers=[2,2,2,2], kernels=[64,128,256,512], channels_in=1, dim_out=16, dimexp=False, pfix=1., mask_key=None, **kwargs):
         super().__init__(**kwargs)
+        # Asymmetry params
+        self.dimexp = dimexp
+        self.mask_key = mask_key
+        self.pfix = pfix
+        # Layers
         self.conv = nnx.Conv(channels_in, 64, kernel_size=(7,7), strides=(2,2), padding="SAME", rngs=key, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
         self.layers = []
         for j, l in enumerate(layers):
@@ -58,6 +63,12 @@ class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
         self.fc = nnx.Linear(kernels[-1]+3, dim_out, rngs=key, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
 
     def __call__(self, x, z, train=True):
+        # Apply asymmetries
+        x = x if not self.dimexp else interleave(x)
+        for modules, _ in self.iter_modules():
+            if not modules or self.pfix==1.: break
+            setattr(self, modules[-1], mask_leaf(getattr(self, modules[-1]), modules[-1][:-1], self.pfix, self.mask_key))
+        # Forward pass
         x = self.conv(x)
         x = nnx.relu(x)
         x = nnx.max_pool(x, window_shape=(3,3), strides=(2,2), padding="SAME")
@@ -90,7 +101,7 @@ def mask_leaf(layer, layer_type, pfix, key):
 
 # LeNet-5 for 36X60 images + 3 auxiliary features
 class LeNet(nnx.Module):
-    def __init__(self, key, dimexp=False, pfix=1.0, mask_key=None):
+    def __init__(self, key, dimexp=False, pfix=1., mask_key=None):
         super().__init__()
         # Asymmetry params
         flat_shape = 15*27 if dimexp else 6*12
