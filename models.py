@@ -77,47 +77,39 @@ def interleave(img):
     return img
 
 # W-Asymmetry masking
-def make_wasym(model, pfix, key):
-    def mask_leaf(kernel, layer_type="fc"):
-        # Note: the masks and values are deterministic, given the same key
-        nonlocal key
-        subkey, key = jax.random.split(key) 
-        # Mask entire filters if conv
-        mask_shape = kernel.shape if layer_type=="fc" else kernel.shape[-1]
-        # Replace masked weights with random values
-        mask = jax.random.bernoulli(key, p=pfix, shape=mask_shape).astype(jnp.float32)
-        kernel = kernel * mask + (1-mask) * jax.random.normal(subkey, kernel.shape)*0
-        return kernel
-    # Apply to each layer
-    struct, fc, conv, rest = nnx.split(
-        model, 
-        nnx.All(lambda path, x: any(re.compile(r"^fc.$").match(segment) for segment in path), nnx.PathContains("kernel")), 
-        nnx.All(lambda path, x: any(re.compile(r"^conv.$").match(segment) for segment in path), nnx.PathContains("kernel")),
-        ...)
-    fc = jax.tree.map(mask_leaf, fc)
-    conv = jax.tree.map(partial(mask_leaf, layer_type="conv"), conv)
-    return nnx.merge(struct, fc, conv, rest)
+def mask_leaf(layer, layer_type, pfix, key):
+    # Note: the masks and values are deterministic, given the same key
+    subkey, key = jax.random.split(key) 
+    # Mask entire filters if conv
+    shape = layer.kernel.value.shape
+    mask_shape = shape if layer_type=="fc" else shape[-1]
+    # Replace masked weights with random values
+    mask = jax.random.bernoulli(key, p=pfix, shape=mask_shape).astype(jnp.float32)
+    layer.kernel.value = layer.kernel.value * mask + (1-mask) * jax.random.normal(subkey, shape)
+    return layer
 
 # LeNet-5 for 36X60 images + 3 auxiliary features
 class LeNet(nnx.Module):
     def __init__(self, key, dimexp=False, pfix=1.0, mask_key=None):
         super().__init__()
         # Asymmetry params
-        flat_shape = 15*27*16 if dimexp else 6*12*16
+        flat_shape = 15*27 if dimexp else 6*12
         self.dimexp = dimexp
         self.mask_key = mask_key
         self.pfix = pfix
         # Layers
         self.conv1 = nnx.Conv(1, 8, (4,4), rngs=key, padding="VALID")
         self.conv2 = nnx.Conv(8, 16, (4,4), rngs=key, padding="VALID")
-        self.fc1 = nnx.Linear(flat_shape+3, 128, rngs=key)
+        self.fc1 = nnx.Linear(flat_shape*16+3, 128, rngs=key)
         self.fc2 = nnx.Linear(128, 64, rngs=key)
         self.fc3 = nnx.Linear(64, 16, rngs=key)
     
     def __call__(self, x, z, train=None):
         # Apply asymmetries
         x = x if not self.dimexp else interleave(x)
-        self = self if self.pfix==1. else make_wasym(self, pfix=self.pfix, key=self.mask_key)
+        for modules, _ in self.iter_modules():
+            if not modules or self.pfix==1.: break
+            setattr(self, modules[-1], mask_leaf(getattr(self, modules[-1]), modules[-1][:-1], self.pfix, self.mask_key))
         # Forward pass
         x = self.conv1(x)
         x = nnx.relu(x)
