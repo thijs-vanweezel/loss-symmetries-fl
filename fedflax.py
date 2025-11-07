@@ -62,7 +62,7 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs, filename=Non
         
         # Local training
         losses = jnp.concat([losses, jnp.zeros((1,n+1))])
-        for epoch in range(local_epochs):
+        for epoch in range(local_epochs): # TODO: should allow for early stopping
             # Collect and save params for visualization
             if filename: save(models, filename, n, overwrite=(r==0 and epoch==0))
             # Iterate over batches
