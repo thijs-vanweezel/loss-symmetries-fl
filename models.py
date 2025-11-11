@@ -101,7 +101,7 @@ def mask_leaf(layer, layer_type, pfix, key):
 
 # LeNet-5 for 36X60 images + 3 auxiliary features
 class LeNet(nnx.Module):
-    def __init__(self, key, dimexp=False, pfix=1., mask_key=None):
+    def __init__(self, key:jax.dtypes.prng_key, dimexp=False, pfix=1., mask_key=None):
         super().__init__()
         # Asymmetry params
         flat_shape = 15*27 if dimexp else 6*12
@@ -109,11 +109,12 @@ class LeNet(nnx.Module):
         self.mask_key = mask_key
         self.pfix = pfix
         # Layers
-        self.conv1 = nnx.Conv(1, 8, (4,4), rngs=key, padding="VALID")
-        self.conv2 = nnx.Conv(8, 16, (4,4), rngs=key, padding="VALID")
-        self.fc1 = nnx.Linear(flat_shape*16+3, 128, rngs=key)
-        self.fc2 = nnx.Linear(128, 64, rngs=key)
-        self.fc3 = nnx.Linear(64, 16, rngs=key)
+        keys = jax.random.split(key, 4)
+        self.conv1 = nnx.Conv(1, 8, (4,4), rngs=nnx.Rngs(key), padding="VALID")
+        self.conv2 = nnx.Conv(8, 16, (4,4), rngs=nnx.Rngs(keys[0]), padding="VALID")
+        self.fc1 = nnx.Linear(flat_shape*16+3, 128, rngs=nnx.Rngs(keys[1]))
+        self.fc2 = nnx.Linear(128, 64, rngs=nnx.Rngs(keys[2]))
+        self.fc3 = nnx.Linear(64, 16, rngs=nnx.Rngs(keys[3]))
     
     def __call__(self, x, z, train=None):
         # Apply asymmetries
