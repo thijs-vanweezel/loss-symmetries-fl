@@ -97,7 +97,7 @@ def mask_leaf(layer, layer_type, pfix, key):
     # Replace masked weights with random values
     mask = jax.random.bernoulli(key, p=pfix, shape=mask_shape).astype(jnp.float32)
     layer.kernel.value = layer.kernel.value * mask + (1-mask) * jax.random.normal(subkey, shape)
-    return layer
+    return layer, key
 
 # LeNet-5 for 36X60 images + 3 auxiliary features
 class LeNet(nnx.Module):
@@ -118,9 +118,11 @@ class LeNet(nnx.Module):
     def __call__(self, x, z, train=None):
         # Apply asymmetries
         x = x if not self.dimexp else interleave(x)
-        for modules, _ in self.iter_modules():
-            if not modules or self.pfix==1.: break
-            setattr(self, modules[-1], mask_leaf(getattr(self, modules[-1]), modules[-1][:-1], self.pfix, self.mask_key))
+        key = self.mask_key
+        for path, layer in self.iter_modules():
+            if not path or self.pfix==1.: break
+            layer, key = mask_leaf(layer, path[-1][:-1], self.pfix, key)
+            setattr(self, path[-1], layer)
         # Forward pass
         x = self.conv1(x)
         x = nnx.relu(x)
