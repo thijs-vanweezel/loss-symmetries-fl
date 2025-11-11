@@ -65,9 +65,11 @@ class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
     def __call__(self, x, z, train=True):
         # Apply asymmetries
         x = x if not self.dimexp else interleave(x)
-        for modules, _ in self.iter_modules():
-            if not modules or self.pfix==1.: break
-            setattr(self, modules[-1], mask_leaf(getattr(self, modules[-1]), modules[-1][:-1], self.pfix, self.mask_key))
+        key = self.mask_key
+        for path, layer in self.iter_modules():
+            if not path or self.pfix==1.: break
+            layer, key = mask_leaf(layer, path[-1][:-1], self.pfix, key)
+            eval(f"self{''.join(f'.{p}' if isinstance(p, str) else f'[{p}]' for p in path[:-1])}").__setattr__(path[-1], layer) # TODO: anything better than eval?
         # Forward pass
         x = self.conv(x)
         x = nnx.relu(x)
