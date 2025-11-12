@@ -2,7 +2,40 @@ from flax import nnx
 from jax import numpy as jnp
 from itertools import chain
 from functools import partial
-import jax
+import jax, dataclasses
+
+# Dimension expansion
+@jax.vmap
+def interleave(img):
+    img = jnp.repeat(img, 2, axis=0)
+    img = jnp.repeat(img, 2, axis=1)
+    img = img.at[::2].set(.5)
+    img = img.at[:, ::2].set(.5)
+    return img
+
+# W-Asymmetry masking
+def mask_layer(layer, layer_type, pfix, key):
+    # Note: the masks and values are deterministic, given the same key
+    subkey, key = jax.random.split(key) 
+    # Mask entire filters if conv
+    shape = layer.kernel.value.shape
+    mask_shape = shape if layer_type=="fc" else shape[-1]
+    # Replace masked weights with random values
+    mask = jax.random.bernoulli(key, p=pfix, shape=mask_shape).astype(jnp.float32)
+    layer.kernel.value = layer.kernel.value * mask + (1-mask) * jax.random.normal(subkey, shape)
+    return layer, key
+
+class WAsymmetric(nnx.Module):
+    def mask(self, key, pfix):
+        convert_pathpart = lambda p: f".{p}" if isinstance(p, str) else f"[{p}]" if isinstance(p, int) else ""
+        # Apply W-asymmetry per layer
+        for path, layer in self.iter_modules():
+            # Stop if path is root, no asymmetry is desired, or layer has no kernel
+            if (not path) or (pfix==1.) or (not hasattr(layer, "kernel")): continue
+            # Mask layer
+            layer, key = mask_layer(layer, path[-1][:-1], pfix, key)
+            # Re-assign masked layer TODO: anything better than eval?
+            eval(f"self{''.join(convert_pathpart(p) for p in path[:-1])}").__setattr__(path[-1], layer)
 
 # Used in resnet
 class ResNetBlock(nnx.Module):
@@ -44,7 +77,7 @@ class ResNetBlock(nnx.Module):
         return x
 
 # Resnet for ImageNet ([3,4,6,3] for 34 layers, [2,2,2,2] for 18 layers)
-class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
+class ResNet(WAsymmetric): # TODO: 36/(2**5) is a small shape for conv
     def __init__(self, key:nnx.RngKey, block=ResNetBlock, layers=[2,2,2,2], kernels=[64,128,256,512], channels_in=1, dim_out=16, dimexp=False, pfix=1., mask_key=None, **kwargs):
         super().__init__(**kwargs)
         # Asymmetry params
@@ -65,11 +98,7 @@ class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
     def __call__(self, x, z, train=True):
         # Apply asymmetries
         x = x if not self.dimexp else interleave(x)
-        key = self.mask_key
-        for path, layer in self.iter_modules():
-            if not path or self.pfix==1.: break
-            layer, key = mask_leaf(layer, path[-1][:-1], self.pfix, key)
-            eval(f"self{''.join(f'.{p}' if isinstance(p, str) else f'[{p}]' for p in path[:-1])}").__setattr__(path[-1], layer) # TODO: anything better than eval?
+        self.mask(self.mask_key, self.pfix)
         # Forward pass
         x = self.conv(x)
         x = nnx.relu(x)
@@ -79,30 +108,9 @@ class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
         x = jnp.mean(x, axis=(1,2))
         x = self.fc(jnp.concatenate([x, z], axis=-1))
         return x
-    
-# Dimension expansion
-@jax.vmap
-def interleave(img):
-    img = jnp.repeat(img, 2, axis=0)
-    img = jnp.repeat(img, 2, axis=1)
-    img = img.at[::2].set(.5)
-    img = img.at[:, ::2].set(.5)
-    return img
-
-# W-Asymmetry masking
-def mask_leaf(layer, layer_type, pfix, key):
-    # Note: the masks and values are deterministic, given the same key
-    subkey, key = jax.random.split(key) 
-    # Mask entire filters if conv
-    shape = layer.kernel.value.shape
-    mask_shape = shape if layer_type=="fc" else shape[-1]
-    # Replace masked weights with random values
-    mask = jax.random.bernoulli(key, p=pfix, shape=mask_shape).astype(jnp.float32)
-    layer.kernel.value = layer.kernel.value * mask + (1-mask) * jax.random.normal(subkey, shape)
-    return layer, key
 
 # LeNet-5 for 36X60 images + 3 auxiliary features
-class LeNet(nnx.Module):
+class LeNet(WAsymmetric):
     def __init__(self, key:jax.dtypes.prng_key, dimexp=False, pfix=1., mask_key=None):
         super().__init__()
         # Asymmetry params
@@ -121,11 +129,7 @@ class LeNet(nnx.Module):
     def __call__(self, x, z, train=None):
         # Apply asymmetries
         x = x if not self.dimexp else interleave(x)
-        key = self.mask_key
-        for path, layer in self.iter_modules():
-            if not path or self.pfix==1.: break
-            layer, key = mask_leaf(layer, path[-1][:-1], self.pfix, key)
-            setattr(self, path[-1], layer)
+        self.mask(self.mask_key)        
         # Forward pass
         x = self.conv1(x)
         x = nnx.relu(x)
