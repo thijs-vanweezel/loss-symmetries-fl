@@ -8,7 +8,7 @@ from tqdm.auto import tqdm
 
 def save(models, filename, n, overwrite):
         with NpyAppendArray(filename, delete_if_exists=overwrite) as f:
-            f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(nnx.split(models, nnx.Param, ...)[1])], axis=1))
+            f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(nnx.split(models, (nnx.Param, nnx.BatchStat), ...)[1])], axis=1))
 
 # Parallelized train step
 def return_train_step(ell):
@@ -22,15 +22,16 @@ def return_train_step(ell):
 
 # Get updates, i.e., difference between initial model and locally converged models
 def get_updates(model_g, models):
-    params = nnx.split(models, nnx.Param, ...)[1]
-    params_g = nnx.split(model_g, nnx.Param, ...)[1]
+    params = nnx.split(models, (nnx.Param, nnx.BatchStat), ...)[1]
+    params_g = nnx.split(model_g, (nnx.Param, nnx.BatchStat), ...)[1]
     return jax.tree.map(lambda pg, p: p-pg, params_g, params) # state of length n_layers with arrays of shape (n_clients, *layer_shape)
 
 def aggregate(model_g, updates):
     # Get model structure
-    struct, params_g, rest = nnx.split(model_g, nnx.Param, ...)
+    struct, params_g, rest = nnx.split(model_g, (nnx.Param, nnx.BatchStat), ...)
     # Average updates
     update = jax.tree.map(lambda x: jnp.mean(x, axis=0), updates)
+    rest = jax.tree.map(lambda r: r[-1], rest)
     # Apply to global model
     params_g = jax.tree.map(lambda pg, u: pg + u, params_g, update)
     # Convert to model
