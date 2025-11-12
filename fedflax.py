@@ -31,7 +31,7 @@ def aggregate(model_g, updates):
     struct, params_g, rest = nnx.split(model_g, (nnx.Param, nnx.BatchStat), ...)
     # Average updates
     update = jax.tree.map(lambda x: jnp.mean(x, axis=0), updates)
-    rest = jax.tree.map(lambda r: r[-1], rest)
+    rest = jax.tree.map(lambda r: r if r.ndim==0 else r[-1], rest)
     # Apply to global model
     params_g = jax.tree.map(lambda pg, u: pg + u, params_g, update)
     # Convert to model
