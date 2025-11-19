@@ -26,14 +26,35 @@ def mask_layer(layer, layer_type, pfix, key):
     return layer, key
 
 class WAsymmetric(nnx.Module):
-    def mask(self, key, pfix):
+    def create_masks(self, key, pfix):
+        # Do nothing if no asymmetry desired
+        if (pfix==1.): self.asym=False; return
+        self.asym=True
+        # Init masks
+        self.masks = {}
+        self.fills = {}
+        # Create mask for each layer
+        for path, layer in self.iter_modules():
+            # Stop if layer has no kernel
+            if not hasattr(layer, "kernel"): continue
+            # Note: the masks and values are deterministic, given the same key
+            subkey, key = jax.random.split(key) 
+            # Mask per filters if conv
+            shape = layer.kernel.value.shape
+            mask_shape = shape if path[-1][:-1]=="fc" else shape[-1]
+            # Replace masked weights with random values
+            self.masks[path] = jax.random.bernoulli(key, p=pfix, shape=mask_shape).astype(jnp.float32)
+            self.fills[path] = jax.random.normal(subkey, shape)
+
+    def apply_masks(self):
         convert_pathpart = lambda p: f".{p}" if isinstance(p, str) else f"[{p}]" if isinstance(p, int) else ""
         # Apply W-asymmetry per layer
         for path, layer in self.iter_modules():
-            # Stop if path is root, no asymmetry is desired, or layer has no kernel
-            if (not path) or (pfix==1.) or (not hasattr(layer, "kernel")): continue
+            # Stop if no asymmetry is desired or layer has no kernel
+            if (not self.asym) or (not hasattr(layer, "kernel")): continue
             # Mask layer
-            layer, key = mask_layer(layer, path[-1][:-1], pfix, key)
+            mask = self.masks[path]
+            layer.kernel.value = layer.kernel.value * mask# + (1-mask) * self.fills[path]
             # Re-assign masked layer TODO: anything better than eval?
             eval(f"self{''.join(convert_pathpart(p) for p in path[:-1])}").__setattr__(path[-1], layer)
 
@@ -94,11 +115,12 @@ class ResNet(WAsymmetric): # TODO: 36/(2**5) is a small shape for conv
                 s = 2 if i==0 and j>0 else 1
                 self.layers.append(block(key, k_in, k_out, stride=s))
         self.fc = nnx.Linear(kernels[-1]+3, dim_out, rngs=key, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
+        self.create_masks(self.mask_key, self.pfix)
 
     def __call__(self, x, z, train=True):
         # Apply asymmetries
         x = x if not self.dimexp else interleave(x)
-        self.mask(self.mask_key, self.pfix)
+        self.apply_masks()
         # Forward pass
         x = self.conv(x)
         x = nnx.relu(x)
