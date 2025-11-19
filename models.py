@@ -13,18 +13,6 @@ def interleave(img):
     img = img.at[:, ::2].set(.5)
     return img
 
-# W-Asymmetry masking
-def mask_layer(layer, layer_type, pfix, key):
-    # Note: the masks and values are deterministic, given the same key
-    subkey, key = jax.random.split(key) 
-    # Mask entire filters if conv
-    shape = layer.kernel.value.shape
-    mask_shape = shape if layer_type=="fc" else shape[-1]
-    # Replace masked weights with random values
-    mask = jax.random.bernoulli(key, p=pfix, shape=mask_shape).astype(jnp.float32)
-    layer.kernel.value = layer.kernel.value * mask + (1-mask) * jax.random.normal(subkey, shape)
-    return layer, key
-
 class WAsymmetric(nnx.Module):
     def create_masks(self, key, pfix):
         # Do nothing if no asymmetry desired
@@ -147,11 +135,12 @@ class LeNet(WAsymmetric):
         self.fc1 = nnx.Linear(flat_shape*16+3, 128, rngs=nnx.Rngs(keys[1]))
         self.fc2 = nnx.Linear(128, 64, rngs=nnx.Rngs(keys[2]))
         self.fc3 = nnx.Linear(64, 16, rngs=nnx.Rngs(keys[3]))
+        self.create_masks(self.mask_key, self.pfix)
     
     def __call__(self, x, z, train=None):
         # Apply asymmetries
         x = x if not self.dimexp else interleave(x)
-        self.mask(self.mask_key)        
+        self.apply_masks()        
         # Forward pass
         x = self.conv1(x)
         x = nnx.relu(x)
