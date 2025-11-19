@@ -84,7 +84,7 @@ class ResNetBlock(nnx.Module):
         x = self.conv2(x)
         x = self.norm2(x, use_running_average=not train)
         x = res+x
-        x = self.dropout(x, deterministic=train)
+        x = self.dropout(x, deterministic=not train)
         return x
 
 # Resnet for ImageNet ([3,4,6,3] for 34 layers, [2,2,2,2] for 18 layers)
