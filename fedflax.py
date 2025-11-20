@@ -15,7 +15,7 @@ def return_train_step(ell):
     @nnx.jit
     @nnx.vmap(in_axes=(0,None,0,0,0,0))
     def train_step(model, model_g, opt, x_batch, z_batch, y_batch):
-        loss, grad = nnx.value_and_grad(partial(ell, train=True))(model, model_g, x_batch, z_batch, y_batch)
+        loss, grad = nnx.value_and_grad(ell)(model, model_g, x_batch, z_batch, y_batch)
         opt.update(grad)
         return loss
     return train_step
