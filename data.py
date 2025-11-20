@@ -133,11 +133,10 @@ def get_gaze(skew:str="feature", batch_size=128, n_clients=4, beta:float=0, path
     indiv_frac = n_indiv / new_batch_size
     # Iterable batches
     return DataLoader(
-        MPIIGaze(n_clients=n_clients, path=os.path.join(path, partition)),
+        MPIIGaze(n_clients=n_clients, path=os.path.join(path, partition), clf=clf),
         batch_size=new_batch_size,
         collate_fn=partial(jax_collate, n_clients=n_clients, indiv_frac=indiv_frac, skew=skew),
         shuffle=False,
         drop_last=True,
-        clf=clf,
         **kwargs
     )
