@@ -56,16 +56,21 @@ class MPIIGaze(Dataset):
         i = idx//self.n_clients
         # Load
         img, aux, label = torch.load(self.files[client][i])
-        # Flip if right eye
-        img = img if self.files[client][i].endswith("left.pt") else torch.flip(img, [1])
+        # # Flip if right eye
+        if self.files[client][i].endswith("right.pt"):
+            img = torch.flip(img, [1])
+            label[1] = -label[1]
         # Process label into one of 16 regions
         label = torch.asarray([torch.arcsin(-label[1]), torch.arctan2(-label[0], -label[2])]) # polar coordinates
+        nr = 2
+        min_0, max_0, min_1, max_1 = -0.36719793, 0.3623084, -0.31378174, 0.38604215 # mins and maxs taken from training set
+        min_0, max_0, min_1, max_1 = min_0*(1-1/nr), max_0*(1-1/nr), min_1*(1-1/nr), max_1*(1-1/nr)
         regions = torch.concat([
-            torch.cartesian_prod(torch.linspace(-0.3675091, 0.0831264, 4), torch.linspace(-0.31378174, 0.38604215, 4)[:2]),
-            torch.cartesian_prod(torch.linspace(-0.3675091, 0.0831264, 4), torch.linspace(-0.31378174, 0.38604215, 4)[2:])
-        ]) # mins and maxs of training set
+            torch.cartesian_prod(torch.linspace(min_0, max_0, nr), torch.linspace(min_1, max_1, nr)[:2]),
+            torch.cartesian_prod(torch.linspace(min_0, max_0, nr), torch.linspace(min_1, max_1, nr)[2:])
+        ]) 
         label = torch.abs(label - regions).sum(axis=1).argmin() # nearest region
-        label = torch.eye(4*4)[label] # one-hot encode
+        label = torch.eye(2*2)[label] # one-hot encode
         return img, aux, label
 
 def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
