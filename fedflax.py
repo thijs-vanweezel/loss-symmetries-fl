@@ -45,11 +45,13 @@ def cast(model_g, n):
     models = nnx.from_tree(jax.tree.unflatten(struct, params_all))
     return models
 
-def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs, filename=None, n=4, max_patience=None, rounds=None):
+def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs,filename=None, n=4, max_patience=None, rounds=None, val_fn=None):
     # Parallelize train step
     train_step = return_train_step(ell)
     # Acc function that can be used as stand-alone
-    acc_fn = nnx.jit(nnx.vmap(lambda m,x,z,y: (m(x,z,train=False).argmax(-1)==y.argmax(-1)).mean()))
+    val_fn = nnx.jit(nnx.vmap(
+        val_fn or (lambda m,x,z,y: (m(x,z,train=False).argmax(-1)==y.argmax(-1)).mean())
+    ))
 
     # Communication rounds
     losses = jnp.zeros((0,n+1)) # last column for validation loss
@@ -74,7 +76,7 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs, filename=Non
 
         # Evaluate
         losses = losses.at[-1,:-1].set(losses[-1,:-1]/local_epochs/len(ds_train))    
-        val_acc = reduce(lambda a,b: a+acc_fn(models, *b).mean(), ds_val, 0.)
+        val_acc = reduce(lambda a,b: a+val_fn(models, *b).mean(), ds_val, 0.)
         val_acc /= len(ds_val)
         losses = losses.at[-1, -1].set(val_acc)
         print(f"round {r} validation accuracy (mean over clients): {val_acc}")
