@@ -48,8 +48,9 @@ class WAsymmetric(nnx.Module):
 
 # Used in resnet
 class ResNetBlock(nnx.Module):
-    def __init__(self, key:nnx.RngKey, in_kernels:int, out_kernels:int, stride:int=1):
+    def __init__(self, key:jax.dtypes.prng_key, in_kernels:int, out_kernels:int, stride:int=1):
         super().__init__()
+        keys = jax.random.split(key, 5)
         self.stride = stride
         self.conv1 = nnx.Conv(
             in_features=in_kernels,
@@ -57,23 +58,23 @@ class ResNetBlock(nnx.Module):
             kernel_size=(3,3),
             strides=(stride,stride),
             padding="SAME",
-            rngs=key,
+            rngs=nnx.Rngs(keys[0]),
             param_dtype=jnp.bfloat16,
             dtype=jnp.bfloat16
         )
-        self.norm1 = nnx.BatchNorm(out_kernels, rngs=key, param_dtype=jnp.float32, dtype=jnp.bfloat16)
+        self.norm1 = nnx.BatchNorm(out_kernels, rngs=nnx.Rngs(keys[1]), param_dtype=jnp.float32, dtype=jnp.bfloat16)
         self.conv2 = nnx.Conv(
             in_features=out_kernels,
             out_features=out_kernels,
             kernel_size=(3,3),
             padding="SAME",
-            rngs=key,
+            rngs=nnx.Rngs(keys[2]),
             param_dtype=jnp.bfloat16,
             dtype=jnp.bfloat16
         )
-        self.norm2 = nnx.BatchNorm(out_kernels, rngs=key, param_dtype=jnp.float32, dtype=jnp.bfloat16)
+        self.norm2 = nnx.BatchNorm(out_kernels, rngs=nnx.Rngs(keys[3]), param_dtype=jnp.float32, dtype=jnp.bfloat16)
         if stride>1 and in_kernels!=out_kernels:
-            self.id_conv = nnx.Conv(in_kernels, out_kernels, kernel_size=(1,1), strides=(stride, stride), rngs=key, dtype=jnp.bfloat16, param_dtype=jnp.bfloat16)
+            self.id_conv = nnx.Conv(in_kernels, out_kernels, kernel_size=(1,1), strides=(stride, stride), rngs=nnx.Rngs(keys[4]), dtype=jnp.bfloat16, param_dtype=jnp.bfloat16)
 
     def __call__(self, x, train=True):
         res = x if self.stride==1 else self.id_conv(x)
@@ -87,23 +88,25 @@ class ResNetBlock(nnx.Module):
 
 # Resnet for ImageNet ([3,4,6,3] for 34 layers, [2,2,2,2] for 18 layers)
 class ResNet(WAsymmetric): # TODO: 36/(2**5) is a small shape for conv
-    def __init__(self, key:nnx.RngKey, block=ResNetBlock, layers=[2,2,2,2], kernels=[64,128,256,512], channels_in=1, dim_out=9, dimexp=False, pfix=1., mask_key=None, **kwargs):
+    def __init__(self, key:jax.dtypes.prng_key, block=ResNetBlock, layers=[2,2,2,2], kernels=[64,128,256,512], channels_in=1, dim_out=9, dimexp=False, pfix=1., **kwargs):
         super().__init__(**kwargs)
         # Asymmetry params
         self.dimexp = dimexp
-        self.mask_key = mask_key
         self.pfix = pfix
+        # Keys
+        keys = jax.random.split(key, sum(layers)+3)
         # Layers
-        self.conv = nnx.Conv(channels_in, 64, kernel_size=(7,7), strides=(2,2), padding="SAME", rngs=key, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
+        self.conv = nnx.Conv(channels_in, 64, kernel_size=(7,7), strides=(2,2), padding="SAME", rngs=nnx.Rngs(keys[0]), param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
         self.layers = []
         for j, l in enumerate(layers):
             for i in range(l):
                 k_in = ([64]+kernels)[j] if i==0 else kernels[j]
                 k_out = kernels[j]
                 s = 2 if i==0 and j>0 else 1
-                self.layers.append(block(key, k_in, k_out, stride=s))
-        self.fc = nnx.Linear(kernels[-1]+3, dim_out, rngs=key, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
-        self.create_masks(self.mask_key, self.pfix)
+                self.layers.append(block(keys[j+(i*j)], k_in, k_out, stride=s))
+        self.fc = nnx.Linear(kernels[-1]+3, dim_out, rngs=nnx.Rngs(keys[-2]), param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
+        # Masks
+        self.create_masks(keys[-1], self.pfix)
 
     def __call__(self, x, z, train=True):
         # Apply asymmetries
@@ -121,21 +124,20 @@ class ResNet(WAsymmetric): # TODO: 36/(2**5) is a small shape for conv
 
 # LeNet-5 for 36X60 images + 3 auxiliary features
 class LeNet(WAsymmetric):
-    def __init__(self, key:jax.dtypes.prng_key, dimexp=False, pfix=1., mask_key=None):
+    def __init__(self, key:jax.dtypes.prng_key, dimexp=False, pfix=1.):
         super().__init__()
         # Asymmetry params
         flat_shape = 15*27 if dimexp else 6*12
         self.dimexp = dimexp
-        self.mask_key = mask_key
         self.pfix = pfix
         # Layers
-        keys = jax.random.split(key, 4)
+        keys = jax.random.split(key, 5)
         self.conv1 = nnx.Conv(1, 8, (4,4), rngs=nnx.Rngs(key), padding="VALID")
         self.conv2 = nnx.Conv(8, 16, (4,4), rngs=nnx.Rngs(keys[0]), padding="VALID")
         self.fc1 = nnx.Linear(flat_shape*16+3, 128, rngs=nnx.Rngs(keys[1]))
         self.fc2 = nnx.Linear(128, 64, rngs=nnx.Rngs(keys[2]))
         self.fc3 = nnx.Linear(64, 9, rngs=nnx.Rngs(keys[3]))
-        self.create_masks(self.mask_key, self.pfix)
+        self.create_masks(keys[4], self.pfix)
     
     def __call__(self, x, z, train=None):
         # Apply asymmetries
