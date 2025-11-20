@@ -89,7 +89,7 @@ class ResNetBlock(nnx.Module):
 
 # Resnet for ImageNet ([3,4,6,3] for 34 layers, [2,2,2,2] for 18 layers)
 class ResNet(WAsymmetric): # TODO: 36/(2**5) is a small shape for conv
-    def __init__(self, key:nnx.RngKey, block=ResNetBlock, layers=[2,2,2,2], kernels=[64,128,256,512], channels_in=1, dim_out=16, dimexp=False, pfix=1., mask_key=None, **kwargs):
+    def __init__(self, key:nnx.RngKey, block=ResNetBlock, layers=[2,2,2,2], kernels=[64,128,256,512], channels_in=1, dim_out=9, dimexp=False, pfix=1., mask_key=None, **kwargs):
         super().__init__(**kwargs)
         # Asymmetry params
         self.dimexp = dimexp
@@ -136,7 +136,7 @@ class LeNet(WAsymmetric):
         self.conv2 = nnx.Conv(8, 16, (4,4), rngs=nnx.Rngs(keys[0]), padding="VALID")
         self.fc1 = nnx.Linear(flat_shape*16+3, 128, rngs=nnx.Rngs(keys[1]))
         self.fc2 = nnx.Linear(128, 64, rngs=nnx.Rngs(keys[2]))
-        self.fc3 = nnx.Linear(64, 16, rngs=nnx.Rngs(keys[3]))
+        self.fc3 = nnx.Linear(64, 9, rngs=nnx.Rngs(keys[3]))
         self.create_masks(self.mask_key, self.pfix)
     
     def __call__(self, x, z, train=None):
