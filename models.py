@@ -74,7 +74,6 @@ class ResNetBlock(nnx.Module):
         self.norm2 = nnx.BatchNorm(out_kernels, rngs=key, param_dtype=jnp.float32, dtype=jnp.bfloat16)
         if stride>1 and in_kernels!=out_kernels:
             self.id_conv = nnx.Conv(in_kernels, out_kernels, kernel_size=(1,1), strides=(stride, stride), rngs=key, dtype=jnp.bfloat16, param_dtype=jnp.bfloat16)
-        self.dropout = nnx.Dropout(.3, rngs=key)
 
     def __call__(self, x, train=True):
         res = x if self.stride==1 else self.id_conv(x)
@@ -84,7 +83,6 @@ class ResNetBlock(nnx.Module):
         x = self.conv2(x)
         x = self.norm2(x, use_running_average=not train)
         x = res+x
-        x = self.dropout(x, deterministic=not train)
         return x
 
 # Resnet for ImageNet ([3,4,6,3] for 34 layers, [2,2,2,2] for 18 layers)
