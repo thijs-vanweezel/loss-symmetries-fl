@@ -138,6 +138,7 @@ class ResNet(Asymmetric): # TODO: 36/(2**5) is a small shape for conv
             x = layer(x, train=train)
         x = jnp.mean(x, axis=(1,2))
         x = self.fc(jnp.concatenate([x, z], axis=-1))
+        self.apply_syre(self.sigma, application=-1)
         return x
 
 # LeNet-5 for 36X60 images + 3 auxiliary features
