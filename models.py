@@ -13,37 +13,49 @@ def interleave(img):
     img = img.at[:, ::2].set(.5)
     return img
 
-class WAsymmetric(nnx.Module):
-    def create_masks(self, key, pfix):
-        # Do nothing if no asymmetry desired
-        if (pfix==1.): self.asym=False; return
-        self.asym=True
+convert_pathpart = lambda p: f".{p}" if isinstance(p, str) else f"[{p}]" if isinstance(p, int) else ""
+class Asymmetric(nnx.Module):
+    def create_masks(self, key, pfix, sigma):
+        # Skip if no asymmetry is required
+        if not(wasym:=pfix<1.) and (sigma==0.): return
+        self.wasym = wasym
         # Init masks
-        self.masks = {}
-        self.fills = {}
+        if wasym: self.masks = {}
+        self.gauss = {}
         # Create mask for each layer
         for path, layer in self.iter_modules():
             # Stop if layer has no kernel
             if not hasattr(layer, "kernel"): continue
             # Note: the masks and values are deterministic, given the same key
             subkey, key = jax.random.split(key) 
-            # Mask per filters if conv
             shape = layer.kernel.value.shape
+            # Create Gaussian values for SyRe and wasym
+            self.gauss[path] = jax.random.normal(subkey, shape)
+            # Create masks for w-asymmetry 
+            if not wasym: continue
+            # Mask per filter if conv
             mask_shape = shape if path[-1][:-1]=="fc" else shape[-1]
-            # Replace masked weights with random values
             self.masks[path] = jax.random.bernoulli(key, p=pfix, shape=mask_shape).astype(jnp.float32)
-            self.fills[path] = jax.random.normal(subkey, shape)
 
     def apply_masks(self):
-        convert_pathpart = lambda p: f".{p}" if isinstance(p, str) else f"[{p}]" if isinstance(p, int) else ""
         # Apply W-asymmetry per layer
         for path, layer in self.iter_modules():
             # Stop if no asymmetry is desired or layer has no kernel
-            if (not self.asym) or (not hasattr(layer, "kernel")): continue
+            if (not self.wasym) or (not hasattr(layer, "kernel")): continue
             # Mask layer
             mask = self.masks[path]
-            layer.kernel.value = layer.kernel.value * mask + (1-mask) * self.fills[path]
+            layer.kernel.value = layer.kernel.value * mask + (1-mask) * self.gauss[path]
             # Re-assign masked layer TODO: anything better than eval?
+            eval(f"self{''.join(convert_pathpart(p) for p in path[:-1])}").__setattr__(path[-1], layer)
+    
+    def apply_syre(self, sigma=.05):
+        # Apply symmetry regularization (SyRe) per layer (NOTE: requires a weight decay optimizer such as adamw)
+        for path, layer in self.iter_modules():
+            # Stop if no asymmetry is desired or layer has no kernel
+            if (sigma==0.) or (not hasattr(layer, "kernel")): continue
+            # Bias layer
+            layer.kernel.value = layer.kernel.value + self.gauss[path]*sigma
+            # Re-assign layer
             eval(f"self{''.join(convert_pathpart(p) for p in path[:-1])}").__setattr__(path[-1], layer)
 
 # Used in resnet
@@ -87,12 +99,13 @@ class ResNetBlock(nnx.Module):
         return x
 
 # Resnet for ImageNet ([3,4,6,3] for 34 layers, [2,2,2,2] for 18 layers)
-class ResNet(WAsymmetric): # TODO: 36/(2**5) is a small shape for conv
-    def __init__(self, key:jax.dtypes.prng_key, block=ResNetBlock, layers=[2,2,2,2], kernels=[64,128,256,512], channels_in=1, dim_out=9, dimexp=False, pfix=1., **kwargs):
+class ResNet(Asymmetric): # TODO: 36/(2**5) is a small shape for conv
+    def __init__(self, key:jax.dtypes.prng_key, block=ResNetBlock, layers=[2,2,2,2], kernels=[64,128,256,512], channels_in=1, dim_out=9, dimexp=False, pfix=1., syre_sigma=0., **kwargs):
         super().__init__(**kwargs)
         # Asymmetry params
         self.dimexp = dimexp
         self.pfix = pfix
+        self.sigma = syre_sigma
         # Keys
         keys = jax.random.split(key, sum(layers)+3)
         # Layers
@@ -106,12 +119,13 @@ class ResNet(WAsymmetric): # TODO: 36/(2**5) is a small shape for conv
                 self.layers.append(block(keys[j+(i*j)], k_in, k_out, stride=s))
         self.fc = nnx.Linear(kernels[-1]+3, dim_out, rngs=nnx.Rngs(keys[-2]), param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
         # Masks
-        self.create_masks(keys[-1], self.pfix)
+        self.create_masks(keys[-1], self.pfix, self.sigma)
 
     def __call__(self, x, z, train=True):
         # Apply asymmetries
         x = x if not self.dimexp else interleave(x)
         self.apply_masks()
+        self.apply_syre(self.sigma)
         # Forward pass
         x = self.conv(x)
         x = nnx.relu(x)
@@ -123,13 +137,14 @@ class ResNet(WAsymmetric): # TODO: 36/(2**5) is a small shape for conv
         return x
 
 # LeNet-5 for 36X60 images + 3 auxiliary features
-class LeNet(WAsymmetric):
-    def __init__(self, key:jax.dtypes.prng_key, dimexp=False, pfix=1., dim_out=9):
+class LeNet(Asymmetric):
+    def __init__(self, key:jax.dtypes.prng_key, dimexp=False, pfix=1., dim_out=9, syre_sigma=0.):
         super().__init__()
         # Asymmetry params
         flat_shape = 15*27 if dimexp else 6*12
         self.dimexp = dimexp
         self.pfix = pfix
+        self.sigma = syre_sigma
         # Layers
         keys = jax.random.split(key, 5)
         self.conv1 = nnx.Conv(1, 8, (4,4), rngs=nnx.Rngs(key), padding="VALID")
@@ -137,12 +152,13 @@ class LeNet(WAsymmetric):
         self.fc1 = nnx.Linear(flat_shape*16+3, 128, rngs=nnx.Rngs(keys[1]))
         self.fc2 = nnx.Linear(128, 64, rngs=nnx.Rngs(keys[2]))
         self.fc3 = nnx.Linear(64, dim_out, rngs=nnx.Rngs(keys[3]))
-        self.create_masks(keys[4], self.pfix)
+        self.create_masks(keys[4], self.pfix, self.sigma)
     
     def __call__(self, x, z, train=None):
         # Apply asymmetries
         x = x if not self.dimexp else interleave(x)
-        self.apply_masks()        
+        self.apply_masks() 
+        self.apply_syre(self.sigma)       
         # Forward pass
         x = self.conv1(x)
         x = nnx.relu(x)
