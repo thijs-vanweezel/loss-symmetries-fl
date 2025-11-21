@@ -72,14 +72,14 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs,filename=None
             for x_batch, z_batch, y_batch in (bar := tqdm(ds_train, leave=False)):
                 loss = train_step(models, model_g, opts, x_batch, z_batch, y_batch)
                 losses = losses.at[-1,:-1].set(losses[-1,:-1] + loss)
-                bar.set_description(f"Round {r} Epoch {epoch+1}/{local_epochs}. Batch loss: {loss.mean():.4f}")
+                bar.set_description(f"Batch loss: {loss.mean():.4f}. Round {r} Epoch {epoch+1}/{local_epochs}")
 
         # Evaluate
         losses = losses.at[-1,:-1].set(losses[-1,:-1]/local_epochs/len(ds_train))    
         val_acc = reduce(lambda a,b: a+val_fn(models, *b).mean(), ds_val, 0.)
         val_acc /= len(ds_val)
         losses = losses.at[-1, -1].set(val_acc)
-        print(f"round {r} validation accuracy (mean over clients): {val_acc}")
+        print(f"round {r} validation score (mean over clients): {val_acc}")
         
         # Aggregate
         updates = get_updates(model_g, models)
