@@ -55,9 +55,10 @@ class Asymmetric(nnx.Module):
         # Apply symmetry removal (SyRe) per layer (NOTE: requires a weight decay optimizer such as adamw)
         for path, layer in self.iter_modules():
             # Stop if no asymmetry is desired or layer has no kernel
-            if not (hasattr(layer, "kernel") or hasattr(layer, "bias")): continue
-            # Bias layer
-            layer.kernel.value = layer.kernel.value + self.rand[path]*sigma
+            if not (hasattr(layer, "kernel") or (bias:=hasattr(layer, "bias"))): continue
+            # Apply static bias to layer's value
+            if bias: layer.bias.value = layer.bias.value + self.rand[path]*sigma
+            else: layer.kernel.value = layer.kernel.value + self.rand[path]*sigma
             # Re-assign layer
             eval(f"self{''.join(convert_pathpart(p) for p in path[:-1])}").__setattr__(path[-1], layer)
 
