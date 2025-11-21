@@ -21,7 +21,7 @@ class Asymmetric(nnx.Module):
         if (not self.wasym) and (sigma==0.): return
         # Init masks
         if self.wasym: self.masks = {}
-        self.gauss = {}
+        self.rand = {}
         # Create mask for each layer
         for path, layer in self.iter_modules():
             # Stop if layer has no kernel
@@ -30,7 +30,7 @@ class Asymmetric(nnx.Module):
             subkey, key = jax.random.split(key) 
             shape = layer.kernel.value.shape
             # Create Gaussian values for SyRe and wasym
-            self.gauss[path] = jax.random.normal(subkey, shape)
+            self.rand[path] = jax.random.normal(subkey, shape)
             # Create masks for w-asymmetry 
             if not self.wasym: continue
             # Mask per filter if conv
@@ -38,23 +38,25 @@ class Asymmetric(nnx.Module):
             self.masks[path] = jax.random.bernoulli(key, p=pfix, shape=mask_shape).astype(jnp.float32)
 
     def apply_masks(self):
+        if not self.wasym: return
         # Apply W-asymmetry per layer
         for path, layer in self.iter_modules():
             # Stop if no asymmetry is desired or layer has no kernel
-            if (not self.wasym) or (not hasattr(layer, "kernel")): continue
+            if not hasattr(layer, "kernel"): continue
             # Mask layer
             mask = self.masks[path]
-            layer.kernel.value = layer.kernel.value * mask + (1-mask) * self.gauss[path]
+            layer.kernel.value = layer.kernel.value * mask + (1-mask) * self.rand[path]
             # Re-assign masked layer TODO: anything better than eval?
             eval(f"self{''.join(convert_pathpart(p) for p in path[:-1])}").__setattr__(path[-1], layer)
     
     def apply_syre(self, sigma=.05):
-        # Apply symmetry regularization (SyRe) per layer (NOTE: requires a weight decay optimizer such as adamw)
+        if sigma==0.: return
+        # Apply symmetry removal (SyRe) per layer (NOTE: requires a weight decay optimizer such as adamw)
         for path, layer in self.iter_modules():
             # Stop if no asymmetry is desired or layer has no kernel
-            if (sigma==0.) or (not hasattr(layer, "kernel")): continue
+            if not hasattr(layer, "kernel"): continue
             # Bias layer
-            layer.kernel.value = layer.kernel.value + self.gauss[path]*sigma
+            layer.kernel.value = layer.kernel.value + self.rand[path]*sigma
             # Re-assign layer
             eval(f"self{''.join(convert_pathpart(p) for p in path[:-1])}").__setattr__(path[-1], layer)
 
