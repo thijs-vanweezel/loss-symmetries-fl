@@ -35,5 +35,5 @@ def return_ell(omega):
         return omega/2*prox + ce
     return ell
 
-# Accuracy function for classification validation
-acc_fn = lambda m,x,z,y: (m(x,z,train=False).argmax(-1)==y.argmax(-1)).mean()
+# Inverse accuracy function for classification validation
+err_fn = lambda m,x,z,y: 1-(m(x,z,train=False).argmax(-1)==y.argmax(-1)).mean()
