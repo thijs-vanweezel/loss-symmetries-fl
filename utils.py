@@ -10,9 +10,12 @@ opt_create = lambda model: nnx.Optimizer(
 )
 
 # Regression loss
-def l2(model, _, x_batch, z_batch, y_batch):
-    val = jnp.square(model(x_batch, z_batch, train=True) - y_batch).mean()
-    return val
+def return_l2(omega):
+    def ell(model, model_g, x_batch, z_batch, y_batch):
+        prox = sum(jax.tree.map(lambda a, b: jnp.sum((a-b)**2), jax.tree.leaves(nnx.to_tree(model)), jax.tree.leaves(nnx.to_tree(model_g))))
+        l2 = jnp.square(model(x_batch, z_batch, train=True) - y_batch).mean()
+        return l2 + omega/2 * prox
+    return ell
 
 # Angular error for regression validation
 to_vec = lambda pitch, yaw: jnp.stack([
@@ -28,7 +31,7 @@ def angle_err(model, x_batch, z_batch, y_batch):
     return jnp.nanmean(jnp.rad2deg(rads))
 
 # Classification loss including softmax layer
-def return_ell(omega):
+def return_ce(omega):
     def ell(model, model_g, x_batch, z_batch, y_batch):
         prox = sum(jax.tree.map(lambda a, b: jnp.sum((a-b)**2), jax.tree.leaves(nnx.to_tree(model)), jax.tree.leaves(nnx.to_tree(model_g))))
         ce = optax.softmax_cross_entropy(model(x_batch, z_batch, train=True), y_batch).mean()
