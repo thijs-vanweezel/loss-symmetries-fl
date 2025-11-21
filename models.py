@@ -17,10 +17,10 @@ convert_pathpart = lambda p: f".{p}" if isinstance(p, str) else f"[{p}]" if isin
 class Asymmetric(nnx.Module):
     def create_masks(self, key, pfix, sigma):
         # Skip if no asymmetry is required
-        if not(wasym:=pfix<1.) and (sigma==0.): return
-        self.wasym = wasym
+        self.wasym = pfix<1.
+        if (not self.wasym) and (sigma==0.): return
         # Init masks
-        if wasym: self.masks = {}
+        if self.wasym: self.masks = {}
         self.gauss = {}
         # Create mask for each layer
         for path, layer in self.iter_modules():
@@ -32,7 +32,7 @@ class Asymmetric(nnx.Module):
             # Create Gaussian values for SyRe and wasym
             self.gauss[path] = jax.random.normal(subkey, shape)
             # Create masks for w-asymmetry 
-            if not wasym: continue
+            if not self.wasym: continue
             # Mask per filter if conv
             mask_shape = shape if path[-1][:-1]=="fc" else shape[-1]
             self.masks[path] = jax.random.bernoulli(key, p=pfix, shape=mask_shape).astype(jnp.float32)
