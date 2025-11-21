@@ -42,7 +42,7 @@ class Asymmetric(nnx.Module):
         if not self.wasym: return
         # Apply W-asymmetry per layer
         for path, layer in self.iter_modules():
-            # Stop if no asymmetry is desired or layer has no kernel (asymmetrizing bias is not necessary)
+            # Stop if layer has no kernel (masking bias is not necessary)
             if not hasattr(layer, "kernel"): continue
             # Mask layer
             mask = self.masks[path]
@@ -54,7 +54,7 @@ class Asymmetric(nnx.Module):
         if sigma==0.: return
         # Apply symmetry removal (SyRe) per layer (NOTE: requires a weight decay optimizer such as adamw)
         for path, layer in self.iter_modules():
-            # Stop if no asymmetry is desired or layer has no kernel
+            # Stop if layer has no kernel
             if not (hasattr(layer, "kernel") or (bias:=hasattr(layer, "bias"))): continue
             # Apply static bias to layer's value
             if bias: layer.bias.value = layer.bias.value + self.rand[path]*sigma
@@ -126,10 +126,10 @@ class ResNet(Asymmetric): # TODO: 36/(2**5) is a small shape for conv
         self.create_masks(keys[-1], self.pfix, self.sigma)
 
     def __call__(self, x, z, train=True):
-        # Apply asymmetries
+        # Apply asymmetries (syre before wasym to avoid biasing the masks)
         x = x if not self.dimexp else interleave(x)
-        self.apply_masks()
         self.apply_syre(self.sigma)
+        self.apply_masks()
         # Forward pass
         x = self.conv(x)
         x = nnx.relu(x)
@@ -159,10 +159,10 @@ class LeNet(Asymmetric):
         self.create_masks(keys[4], self.pfix, self.sigma)
     
     def __call__(self, x, z, train=None):
-        # Apply asymmetries
+        # Apply asymmetries (syre before wasym to avoid biasing the masks)
         x = x if not self.dimexp else interleave(x)
-        self.apply_masks() 
         self.apply_syre(self.sigma)       
+        self.apply_masks() 
         # Forward pass
         x = self.conv1(x)
         x = nnx.relu(x)
