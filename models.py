@@ -25,7 +25,7 @@ class Asymmetric(nnx.Module):
         # Create mask for each layer
         for path, layer in self.iter_modules():
             # Stop if layer has no kernel
-            if not (hasattr(layer, "kernel") or (bias:=hasattr(layer, "bias"))): continue
+            if not ((bias:=hasattr(layer, "bias")) or hasattr(layer, "kernel")): continue
             # Note: the masks and values are deterministic, given the same key
             subkey, key = jax.random.split(key) 
             if bias: shape = layer.bias.value.shape
@@ -50,12 +50,12 @@ class Asymmetric(nnx.Module):
             # Re-assign masked layer TODO: anything better than eval?
             eval(f"self{''.join(convert_pathpart(p) for p in path[:-1])}").__setattr__(path[-1], layer)
     
-    def apply_syre(self, sigma=.05):
+    def apply_syre(self, sigma):
         if sigma==0.: return
         # Apply symmetry removal (SyRe) per layer (NOTE: requires a weight decay optimizer such as adamw)
         for path, layer in self.iter_modules():
             # Stop if layer has no kernel
-            if not (hasattr(layer, "kernel") or (bias:=hasattr(layer, "bias"))): continue
+            if not ((bias:=hasattr(layer, "bias")) or hasattr(layer, "kernel")): continue
             # Apply static bias to layer's value
             if bias: layer.bias.value = layer.bias.value + self.rand[path]*sigma
             else: layer.kernel.value = layer.kernel.value + self.rand[path]*sigma
