@@ -25,14 +25,15 @@ class Asymmetric(nnx.Module):
         # Create mask for each layer
         for path, layer in self.iter_modules():
             # Stop if layer has no kernel
-            if not hasattr(layer, "kernel"): continue
+            if not (hasattr(layer, "kernel") or (bias:=hasattr(layer, "bias"))): continue
             # Note: the masks and values are deterministic, given the same key
             subkey, key = jax.random.split(key) 
-            shape = layer.kernel.value.shape
+            if bias: shape = layer.bias.value.shape
+            else: shape = layer.kernel.value.shape
             # Create Gaussian values for SyRe and wasym
             self.rand[path] = jax.random.normal(subkey, shape)
             # Create masks for w-asymmetry 
-            if not self.wasym: continue
+            if (not self.wasym) or bias: continue
             # Mask per filter if conv
             mask_shape = shape if path[-1][:-1]=="fc" else shape[-1]
             self.masks[path] = jax.random.bernoulli(key, p=pfix, shape=mask_shape).astype(jnp.float32)
@@ -41,7 +42,7 @@ class Asymmetric(nnx.Module):
         if not self.wasym: return
         # Apply W-asymmetry per layer
         for path, layer in self.iter_modules():
-            # Stop if no asymmetry is desired or layer has no kernel
+            # Stop if no asymmetry is desired or layer has no kernel (asymmetrizing bias is not necessary)
             if not hasattr(layer, "kernel"): continue
             # Mask layer
             mask = self.masks[path]
@@ -54,7 +55,7 @@ class Asymmetric(nnx.Module):
         # Apply symmetry removal (SyRe) per layer (NOTE: requires a weight decay optimizer such as adamw)
         for path, layer in self.iter_modules():
             # Stop if no asymmetry is desired or layer has no kernel
-            if not hasattr(layer, "kernel"): continue
+            if not (hasattr(layer, "kernel") or hasattr(layer, "bias")): continue
             # Bias layer
             layer.kernel.value = layer.kernel.value + self.rand[path]*sigma
             # Re-assign layer
