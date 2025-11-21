@@ -96,4 +96,4 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs,filename=None
     if filename: save(cast(model_g, n), filename, n, overwrite=False)
 
     # Returns for the various analyses
-    return jax.tree.leaves(updates), models
+    return updates, models
