@@ -42,7 +42,7 @@ class WAsymmetric(nnx.Module):
             if (not self.asym) or (not hasattr(layer, "kernel")): continue
             # Mask layer
             mask = self.masks[path]
-            layer.kernel.value = layer.kernel.value * mask# + (1-mask) * self.fills[path]
+            layer.kernel.value = layer.kernel.value * mask + (1-mask) * self.fills[path]
             # Re-assign masked layer TODO: anything better than eval?
             eval(f"self{''.join(convert_pathpart(p) for p in path[:-1])}").__setattr__(path[-1], layer)
 
