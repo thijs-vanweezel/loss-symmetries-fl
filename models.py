@@ -50,15 +50,15 @@ class Asymmetric(nnx.Module):
             # Re-assign masked layer TODO: anything better than eval?
             eval(f"self{''.join(convert_pathpart(p) for p in path[:-1])}").__setattr__(path[-1], layer)
     
-    def apply_syre(self, sigma):
+    def apply_syre(self, sigma, application=1): # TODO: Is `application` a bit hacky?
         if sigma==0.: return
         # Apply symmetry removal (SyRe) per layer (NOTE: requires a weight decay optimizer such as adamw)
         for path, layer in self.iter_modules():
             # Stop if layer has no kernel
             if not ((bias:=hasattr(layer, "bias")) or hasattr(layer, "kernel")): continue
             # Apply static bias to layer's value
-            if bias: layer.bias.value = layer.bias.value + self.rand[path]*sigma
-            else: layer.kernel.value = layer.kernel.value + self.rand[path]*sigma
+            if bias: layer.bias.value = layer.bias.value + application*self.rand[path]*sigma
+            else: layer.kernel.value = layer.kernel.value + application*self.rand[path]*sigma
             # Re-assign layer
             eval(f"self{''.join(convert_pathpart(p) for p in path[:-1])}").__setattr__(path[-1], layer)
 
@@ -177,6 +177,7 @@ class LeNet(Asymmetric):
         x = self.fc2(x)
         x = nnx.relu(x)
         x = self.fc3(x)
+        self.apply_syre(self.sigma, application=-1)
         return x
 
 def teleport_lenet(model, key, tau_range=.1):
