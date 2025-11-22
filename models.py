@@ -18,20 +18,21 @@ class Asymmetric(nnx.Module):
     def create_asym_vars(self, key, pfix, sigma):
         # Skip if no asymmetry is required
         self.wasym = pfix<1.
-        if (not self.wasym) and (sigma==0.): return
+        self.syre = sigma>0.
+        if (not self.wasym) and (not self.syre): return
         # Init masks
         if self.wasym: self.masks = {}
         self.randk = {}
-        if sigma>0.: self.randb = {}
+        if self.syre: self.randb = {}
         # Create mask for each layer
         for path, layer in self.iter_modules():
             # Stop if layer has neither kernel nor bias
-            if not ((bias:=hasattr(layer, "bias")) or (kernel:=hasattr(layer, "kernel"))): continue
+            if not ((bias:=hasattr(layer, "bias")) | (kernel:=hasattr(layer, "kernel"))): continue
             k1, k2, k3 = jax.random.split(key, 3) 
-            if bias: bshape = layer.bias.value.shape
+            if bias and self.syre: bshape = layer.bias.value.shape
             if kernel: kshape = layer.kernel.value.shape
             # Create Gaussian values for SyRe and wasym
-            if bias: self.randb[path] = jax.random.normal(k1, bshape)
+            if bias and self.syre: self.randb[path] = jax.random.normal(k1, bshape)
             if kernel: self.randk[path] = jax.random.normal(k2, kshape)
             # Create masks for w-asymmetry 
             if (not self.wasym) or (not kernel): continue
@@ -47,16 +48,16 @@ class Asymmetric(nnx.Module):
             if not hasattr(layer, "kernel"): continue
             # Mask layer
             mask = self.masks[path]
-            layer.kernel.value = layer.kernel.value * mask + (1-mask) * self.rand[path]
+            layer.kernel.value = layer.kernel.value * mask + (1-mask) * self.randk[path]
             # Re-assign masked layer TODO: anything better than eval?
             eval(f"self{''.join(convert_pathpart(p) for p in path[:-1])}").__setattr__(path[-1], layer)
     
     def apply_syre(self, sigma, application=1): # TODO: Is `application` a bit hacky?
-        if sigma==0.: return
+        if not self.syre: return
         # Apply symmetry removal (SyRe) per layer (NOTE: requires a weight decay optimizer such as adamw)
         for path, layer in self.iter_modules():
             # Stop if layer has no kernel nor bias
-            if not ((bias:=hasattr(layer, "bias")) or (kernel:=hasattr(layer, "kernel"))): continue
+            if not ((bias:=hasattr(layer, "bias")) | (kernel:=hasattr(layer, "kernel"))): continue
             # Apply static bias to layer's values
             if bias: layer.bias.value = layer.bias.value + application*self.randb[path]*sigma
             if kernel: layer.kernel.value = layer.kernel.value + application*self.randk[path]*sigma
