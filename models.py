@@ -15,28 +15,29 @@ def interleave(img):
 
 convert_pathpart = lambda p: f".{p}" if isinstance(p, str) else f"[{p}]" if isinstance(p, int) else ""
 class Asymmetric(nnx.Module):
-    def create_masks(self, key, pfix, sigma):
+    def create_asym_vars(self, key, pfix, sigma):
         # Skip if no asymmetry is required
         self.wasym = pfix<1.
         if (not self.wasym) and (sigma==0.): return
         # Init masks
         if self.wasym: self.masks = {}
-        self.rand = {}
+        self.randk = {}
+        if sigma>0.: self.randb = {}
         # Create mask for each layer
         for path, layer in self.iter_modules():
-            # Stop if layer has no kernel
-            if not ((bias:=hasattr(layer, "bias")) or hasattr(layer, "kernel")): continue
-            # Note: the masks and values are deterministic, given the same key
-            subkey, key = jax.random.split(key) 
-            if bias: shape = layer.bias.value.shape
-            else: shape = layer.kernel.value.shape
+            # Stop if layer has neither kernel nor bias
+            if not ((bias:=hasattr(layer, "bias")) or (kernel:=hasattr(layer, "kernel"))): continue
+            k1, k2, k3 = jax.random.split(key, 3) 
+            if bias: bshape = layer.bias.value.shape
+            if kernel: kshape = layer.kernel.value.shape
             # Create Gaussian values for SyRe and wasym
-            self.rand[path] = jax.random.normal(subkey, shape)
+            if bias: self.randb[path] = jax.random.normal(k1, bshape)
+            if kernel: self.randk[path] = jax.random.normal(k2, kshape)
             # Create masks for w-asymmetry 
-            if (not self.wasym) or bias: continue
+            if (not self.wasym) or (not kernel): continue
             # Mask per filter if conv
-            mask_shape = shape if path[-1][:-1]=="fc" else shape[-1]
-            self.masks[path] = jax.random.bernoulli(key, p=pfix, shape=mask_shape).astype(jnp.float32)
+            mask_shape = kshape if path[-1][:-1]=="fc" else shape[-1]
+            self.masks[path] = jax.random.bernoulli(k3, p=pfix, shape=mask_shape).astype(jnp.float32)
 
     def apply_masks(self):
         if not self.wasym: return
@@ -54,11 +55,11 @@ class Asymmetric(nnx.Module):
         if sigma==0.: return
         # Apply symmetry removal (SyRe) per layer (NOTE: requires a weight decay optimizer such as adamw)
         for path, layer in self.iter_modules():
-            # Stop if layer has no kernel
-            if not ((bias:=hasattr(layer, "bias")) or hasattr(layer, "kernel")): continue
-            # Apply static bias to layer's value
-            if bias: layer.bias.value = layer.bias.value + application*self.rand[path]*sigma
-            else: layer.kernel.value = layer.kernel.value + application*self.rand[path]*sigma
+            # Stop if layer has no kernel nor bias
+            if not ((bias:=hasattr(layer, "bias")) or (kernel:=hasattr(layer, "kernel"))): continue
+            # Apply static bias to layer's values
+            if bias: layer.bias.value = layer.bias.value + application*self.randb[path]*sigma
+            if kernel: layer.kernel.value = layer.kernel.value + application*self.randk[path]*sigma
             # Re-assign layer
             eval(f"self{''.join(convert_pathpart(p) for p in path[:-1])}").__setattr__(path[-1], layer)
 
@@ -123,7 +124,7 @@ class ResNet(Asymmetric): # TODO: 36/(2**5) is a small shape for conv
                 self.layers.append(block(keys[j+(i*j)], k_in, k_out, stride=s))
         self.fc = nnx.Linear(kernels[-1]+3, dim_out, rngs=nnx.Rngs(keys[-2]), param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
         # Masks
-        self.create_masks(keys[-1], self.pfix, self.sigma)
+        self.create_asym_vars(keys[-1], self.pfix, self.sigma)
 
     def __call__(self, x, z, train=True):
         # Apply asymmetries (syre before wasym to avoid biasing the masks)
@@ -157,7 +158,7 @@ class LeNet(Asymmetric):
         self.fc1 = nnx.Linear(flat_shape*16+3, 128, rngs=nnx.Rngs(keys[1]))
         self.fc2 = nnx.Linear(128, 64, rngs=nnx.Rngs(keys[2]))
         self.fc3 = nnx.Linear(64, dim_out, rngs=nnx.Rngs(keys[3]))
-        self.create_masks(keys[4], self.pfix, self.sigma)
+        self.create_asym_vars(keys[4], self.pfix, self.sigma)
     
     def __call__(self, x, z, train=None):
         # Apply asymmetries (syre before wasym to avoid biasing the masks)
