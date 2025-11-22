@@ -36,7 +36,7 @@ class Asymmetric(nnx.Module):
             # Create masks for w-asymmetry 
             if (not self.wasym) or (not kernel): continue
             # Mask per filter if conv
-            mask_shape = kshape if path[-1][:-1]=="fc" else shape[-1]
+            mask_shape = kshape if path[-1][:-1]=="fc" else kshape[-1]
             self.masks[path] = jax.random.bernoulli(k3, p=pfix, shape=mask_shape).astype(jnp.float32)
 
     def apply_masks(self):
