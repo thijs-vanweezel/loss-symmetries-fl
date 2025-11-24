@@ -4,36 +4,28 @@ from torch.utils.data import Dataset, DataLoader, default_collate
 from jax import numpy as jnp
 from functools import partial
 
-def preprocess(original_path="MPIIGaze/MPIIGaze/Data/Normalized"):
+def preprocess(original_path="MPIIGaze/MPIIGaze/Data/Normalized", new_path="MPIIGaze_preprocessed2/"):
     """Run once."""
     # Split the MPIIGaze dataset into train/val/test sets.
-    fps = [f for f in os.listdir(original_path) if f.startswith("p")]
-    for person in fps:
-        mats = list(filter(lambda x: x.endswith(".mat"), os.listdir(os.path.join(original_path, person))))
-        os.makedirs(f"MPIIGaze_preprocessed/train/{person}", exist_ok=True)
-        os.makedirs(f"MPIIGaze_preprocessed/val/{person}", exist_ok=True)
-        os.makedirs(f"MPIIGaze_preprocessed/test/{person}", exist_ok=True)
-        for i, mat in enumerate(mats):
-            if i < .15*len(mats):
-                shutil.copy(os.path.join(original_path, person, mat), f"MPIIGaze_preprocessed/test/{person}/{mat}")
-            elif i < .3*len(mats):
-                shutil.copy(os.path.join(original_path, person, mat), f"MPIIGaze_preprocessed/val/{person}/{mat}")
-            else:
-                shutil.copy(os.path.join(original_path, person, mat), f"MPIIGaze_preprocessed/train/{person}/{mat}")
-    # Convert .mat files to .pt files for faster loading
-    for split in ["train", "val", "test"]:
-        for person in fps:
-            mats = filter(lambda x: x.endswith(".mat"), os.listdir(f"MPIIGaze_preprocessed/{split}/{person}"))
-            for mat in mats:
-                data = loadmat(f"MPIIGaze_preprocessed/{split}/{person}/{mat}")
-                for side in ["left", "right"]:
-                    datum = data["data"][side].item()
-                    for i in range(len(datum["image"].item())):
-                        img = torch.unsqueeze(torch.tensor(datum["image"].item()[i]).float()/255., -1)
-                        pose = torch.tensor(datum["pose"].item()[i]).float()
-                        gaze = torch.tensor(datum["gaze"].item()[i]).float()
-                        torch.save((img, pose, gaze), f"MPIIGaze_preprocessed/{split}/{person}/{mat[:-4]}_{i}_{side}.pt")
-                os.remove(f"MPIIGaze_preprocessed/{split}/{person}/{mat}")
+    shutil.copytree(original_path, "MPIIGaze_preprocessed2/", dirs_exist_ok=True)
+    for person in [p for p in os.listdir("MPIIGaze_preprocessed2/") if p.startswith("p")]:
+        os.makedirs(f"MPIIGaze_preprocessed2/train/{person}")
+        os.makedirs(f"MPIIGaze_preprocessed2/test/{person}")
+        os.makedirs(f"MPIIGaze_preprocessed2/val/{person}")
+        mats = filter(lambda x: x.endswith(".mat"), os.listdir(f"MPIIGaze_preprocessed2/{person}"))
+        # Convert mat files to pt files for faster loading
+        for mat in mats:
+            data = loadmat(f"MPIIGaze_preprocessed2/{person}/{mat}")
+            for side in ["left", "right"]:
+                datum = data["data"][side].item()
+                for i in range(len(datum["image"].item())):
+                    img = torch.unsqueeze(torch.tensor(datum["image"].item()[i]).float()/255., -1)
+                    pose = torch.tensor(datum["pose"].item()[i]).float()
+                    gaze = torch.tensor(datum["gaze"].item()[i]).float()
+                    # Split over train/val/test with 70/15/15 ratio
+                    partition = [["test", "val"], ["train", "train"]][(i%20-14)//14][i%2]
+                    torch.save((img, pose, gaze), f"MPIIGaze_preprocessed2/{partition}/{person}/{mat[:-4]}_{i}_{side}.pt")
+            os.remove(f"MPIIGaze_preprocessed2/{person}/{mat}")
 
 class MPIIGaze(Dataset):
     def __init__(self, path:str, n_clients:int, discrete:bool):
