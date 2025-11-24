@@ -13,6 +13,9 @@ def interleave(img):
     img = img.at[:, ::2].set(.5)
     return img
 
+# Consistent with code in 
+# https://github.com/cptq/asymmetric-networks/blob/main/lmc/models/models_mlp.py#L169 
+# and https://github.com/xu-yz19/syre/blob/main/MLP.ipynb
 class AsymLinear(nnx.Linear):
     def __init__(self, key:jax.dtypes.prng_key, pfree:float=1., sigma:float=0., **kwargs):
         keys = jax.random.split(key, 4)
@@ -21,9 +24,9 @@ class AsymLinear(nnx.Linear):
         self.ssigma = sigma
         self.wasym = pfree<1.
         # Create params
-        if self.wasym: self.wmask = jax.random.bernoulli(keys[1], p=pfree, shape=self.kernel.shape).astype(jnp.float32)
-        if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape)
-        if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape)
+        if self.wasym: self.wmask = jax.random.bernoulli(keys[1], p=pfree, shape=self.kernel.shape).astype(self.param_dtype) # TODO: chech consistency with authors' "random_subsets"
+        if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
+        if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
 
     def __call__(self, inputs:jax.Array) -> jax.Array:
         kernel = self.kernel.value
@@ -34,8 +37,11 @@ class AsymLinear(nnx.Linear):
             kernel = kernel + self.randk * self.ssigma
         # Apply w-asymmetry
         if self.wasym:
-            kernel = kernel * self.wmask + (1-self.wmask) * self.randk # TODO: decrease std
+            kernel = kernel * self.wmask + (1-self.wmask) * self.randk # TODO: experiment with decreased std
         # Implementation directly copied from nnx.Linear
+        inputs, kernel, bias = self.promote_dtype(
+            (inputs, kernel, bias), dtype=self.dtype
+        )
         y = self.dot_general(
             inputs,
             kernel,
@@ -53,9 +59,9 @@ class AsymConv(nnx.Conv):
         self.ssigma = sigma
         self.wasym = pfree<1.
         # Create params
-        if self.wasym: self.wmask = jax.random.bernoulli(keys[1], p=pfree, shape=self.kernel.shape[-1]).astype(jnp.float32)
-        if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape)
-        if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape)
+        if self.wasym: self.wmask = jax.random.bernoulli(keys[1], p=pfree, shape=self.kernel.shape[-1]).astype(self.param_dtype)
+        if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
+        if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
 
     def __call__(self, inputs:jax.Array) -> jax.Array:
         kernel = self.kernel.value
@@ -66,8 +72,11 @@ class AsymConv(nnx.Conv):
             kernel = kernel + self.randk * self.ssigma
         # Apply w-asymmetry
         if self.wasym:
-            kernel = kernel * self.wmask + (1-self.wmask) * self.randk # TODO: decrease std
+            kernel = kernel * self.wmask + (1-self.wmask) * self.randk # TODO: experiment with decreased std
         # Implementation directly copied from nnx.Conv
+        inputs, kernel, bias = self.promote_dtype(
+            (inputs, kernel, bias), dtype=self.dtype
+        )
         def maybe_broadcast(x: int | tuple[int, ...]):
             if isinstance(x, int):
                 return (x,) * len(self.kernel_size)
