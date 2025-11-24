@@ -36,8 +36,8 @@ def preprocess(original_path="MPIIGaze/MPIIGaze/Data/Normalized"):
                 os.remove(f"MPIIGaze_preprocessed/{split}/{person}/{mat}")
 
 class MPIIGaze(Dataset):
-    def __init__(self, path:str, n_clients:int, clf:bool):
-        self.clf = clf
+    def __init__(self, path:str, n_clients:int, discrete:bool):
+        self.discrete = discrete
         self.n_clients = n_clients
         g = os.walk(path)
         self.clients = next(g)[1][:n_clients]
@@ -63,7 +63,7 @@ class MPIIGaze(Dataset):
             label[1] = -label[1]
         # Label to pitch and yaw
         label = torch.asarray([torch.arcsin(-label[1]), torch.arctan2(-label[0], -label[2])]) # polar coordinates
-        if not self.clf: return img, aux, label
+        if not self.discrete: return img, aux, label
         # Process label into one of 16 regions
         nr = 3
         min_0, max_0, min_1, max_1 = -0.36719793, 0.3623084, -0.31378174, 0.38604215 # mins and maxs taken from training set
@@ -122,7 +122,7 @@ def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.nda
 
     return jnp.stack(clients_imgs, 0), jnp.stack(clients_auxs, 0), jnp.stack(clients_labels, 0)
 
-def get_gaze(skew:str="feature", batch_size=128, n_clients=4, beta:float=0, path="MPIIGaze_preprocessed", partition="train", clf:bool=True, **kwargs)->DataLoader:
+def get_gaze(skew:str="feature", batch_size=128, n_clients=4, beta:float=0, path="MPIIGaze_preprocessed", partition="train", discrete:bool=True, **kwargs)->DataLoader:
     assert skew in ["feature", "overlap", "label"], "Skew must be one of 'feature', 'overlap', or 'label'. For no skew, specify beta=0."
     assert beta>=0 and beta<=1, "Beta must be between 0 and 1"
     beta = 1-beta if skew=="overlap" else beta
@@ -133,7 +133,7 @@ def get_gaze(skew:str="feature", batch_size=128, n_clients=4, beta:float=0, path
     indiv_frac = n_indiv / new_batch_size
     # Iterable batches
     return DataLoader(
-        MPIIGaze(n_clients=n_clients, path=os.path.join(path, partition), clf=clf),
+        MPIIGaze(n_clients=n_clients, path=os.path.join(path, partition), discrete=discrete),
         batch_size=new_batch_size,
         collate_fn=partial(jax_collate, n_clients=n_clients, indiv_frac=indiv_frac, skew=skew),
         shuffle=False,
