@@ -5,6 +5,7 @@ from jax import numpy as jnp
 from flax import nnx
 from functools import partial
 from tqdm.auto import tqdm
+from utils import err_fn
 
 def save(models, filename, n, overwrite):
         with NpyAppendArray(filename, delete_if_exists=overwrite) as f:
@@ -48,9 +49,10 @@ def cast(model_g, n):
 def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs,filename=None, n=4, max_patience=None, rounds=None, val_fn=None):
     # Parallelize train step
     train_step = return_train_step(ell)
-    # Acc function that can be used as stand-alone
+    # Validation function that can be used as stand-alone
+    # NOTE: For patience purposes, must be a Minimization metric
     val_fn = nnx.jit(nnx.vmap(
-        val_fn or (lambda m,x,z,y: (m(x,z,train=False).argmax(-1)==y.argmax(-1)).mean())
+        val_fn or err_fn
     ))
 
     # Communication rounds
@@ -76,10 +78,10 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs,filename=None
 
         # Evaluate
         losses = losses.at[-1,:-1].set(losses[-1,:-1]/local_epochs/len(ds_train))    
-        val_acc = reduce(lambda a,b: a+val_fn(models, *b).mean(), ds_val, 0.)
-        val_acc /= len(ds_val)
-        losses = losses.at[-1, -1].set(val_acc)
-        print(f"round {r} validation score (mean over clients): {val_acc}")
+        val = reduce(lambda a,b: a+val_fn(models, *b).mean(), ds_val, 0.)
+        val /= len(ds_val)
+        losses = losses.at[-1, -1].set(val)
+        print(f"round {r} validation score (mean over clients): {val:.4f}")
         
         # Aggregate
         updates = get_updates(model_g, models)
@@ -87,7 +89,7 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs,filename=None
         
         # Check if model is converged
         r += 1
-        if r>1 and val_acc<=losses[-patience-1,-1]:
+        if r>1 and val>=losses[-patience-1,-1]:
             patience += 1
         else:
             patience = 1
