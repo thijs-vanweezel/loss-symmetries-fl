@@ -46,7 +46,7 @@ def cast(model_g, n):
     models = nnx.from_tree(jax.tree.unflatten(struct, params_all))
     return models
 
-def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs,filename=None, n=4, max_patience=None, rounds=None, val_fn=None):
+def train(model_g, opt, ds_train, ds_val, ell, local_epochs,filename=None, n=4, max_patience=None, rounds=None, val_fn=None):
     # Parallelize train step
     train_step = return_train_step(ell)
     # Validation function that can be used as stand-alone
@@ -63,7 +63,7 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs,filename=None
         # Parallelize global model and optimizers
         models = cast(model_g, n)
         if r==0:
-            opts = nnx.vmap(opt_create)(models)
+            opts = nnx.from_tree(jax.tree.map(lambda p: jnp.repeat(jnp.expand_dims(p, 0), n, 0), nnx.to_tree(opt)))
         
         # Local training
         losses = jnp.concat([losses, jnp.zeros((1,n+1))])
