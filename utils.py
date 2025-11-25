@@ -3,7 +3,7 @@ from jax import numpy as jnp
 from flax import nnx
 
 # Optimizer
-opt_create = lambda model, learning_rate=1e-3, **kwargs: nnx.Optimizer(
+opt_create = lambda model, learning_rate, **kwargs: nnx.Optimizer(
     model,
     optax.adamw(learning_rate=learning_rate, **kwargs),
     wrt=nnx.Param
