@@ -1,6 +1,6 @@
 from flax import nnx
 from jax import numpy as jnp
-from itertools import chain
+from itertools import chain, combinations
 from flax.nnx.nn.linear import _conv_dimension_numbers
 import jax
 
@@ -13,9 +13,20 @@ def interleave(img):
     img = img.at[:, ::2].set(.5)
     return img
 
-# Consistent with code in 
-# https://github.com/cptq/asymmetric-networks/blob/main/lmc/models/models_mlp.py#L169 
-# and https://github.com/xu-yz19/syre/blob/main/MLP.ipynb
+# Creates mask with the maximum number of non-zero weights while ensuring that each row is unique
+# https://github.com/cptq/asymmetric-networks/blob/main/lmc/models/models_mlp.py#L224
+def mask_linear(in_dim, out_dim, **kwargs):
+    mask = jnp.ones((in_dim, out_dim), **kwargs)
+    row_idx = 1
+    for num_zeros in range(1, in_dim):
+        for cols_idx in combinations(range(in_dim), num_zeros):
+            mask = mask.at[cols_idx, row_idx].set(0.)
+            row_idx += 1
+            if row_idx >= out_dim:
+                return mask
+
+# W-Asymmetry implementation consistent with https://github.com/cptq/asymmetric-networks/blob/main/lmc/models/models_mlp.py#L169 
+# And SyRe implementation consistent with https://github.com/xu-yz19/syre/blob/main/MLP.ipynb
 class AsymLinear(nnx.Linear):
     def __init__(self, key:jax.dtypes.prng_key, pfree:float=1., sigma:float=0., **kwargs):
         keys = jax.random.split(key, 4)
@@ -24,7 +35,7 @@ class AsymLinear(nnx.Linear):
         self.ssigma = sigma
         self.wasym = pfree<1.
         # Create params
-        if self.wasym: self.wmask = jax.random.bernoulli(keys[1], p=pfree, shape=self.kernel.shape).astype(self.param_dtype) # TODO: chech consistency with authors' "random_subsets"
+        if self.wasym: self.wmask = mask_linear(*self.kernel.shape, dtype=self.param_dtype)
         if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
         if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
 
@@ -51,6 +62,26 @@ class AsymLinear(nnx.Linear):
         y += jnp.reshape(bias, (1,) * (y.ndim - 1) + (-1,))
         return y
 
+# Creates mask with the maximum number of non-zero weights while ensuring that each row is unique
+# Supports only square kernels
+# https://github.com/cptq/asymmetric-networks/blob/main/lmc/models/models_resnet.py#L173
+def mask_conv(in_channels, out_channels, kernel_size, **kwargs):
+    mask = jnp.ones((kernel_size, kernel_size, in_channels, out_channels), **kwargs)
+    weights_per_out_channel = in_channels * kernel_size**2
+    flat_idx_to_3d_idx = jax.vmap(lambda idx : [idx%kernel_size, (idx//kernel_size)%kernel_size, idx//kernel_size**2])
+    out_channel_idx = 1
+
+    for num_zeros in range(1, weights_per_out_channel):
+        flat_cols_idxs = combinations(range(weights_per_out_channel), num_zeros) # not actually column, but rather (in_c, k_h, k_w)
+        cols_idxs = map(jnp.array, flat_cols_idxs)
+        cols_idxs = map(flat_idx_to_3d_idx, cols_idxs)
+        for cols_idx in cols_idxs:
+            if out_channel_idx >= out_channels:
+                return mask
+            mask = mask.at[tuple(cols_idx) + (out_channel_idx,)].set(0)
+            out_channel_idx += 1
+
+# W-Asymmetry implementation consistent with https://github.com/cptq/asymmetric-networks/blob/main/lmc/models/models_resnet.py#L22
 class AsymConv(nnx.Conv):
     def __init__(self, key:jax.dtypes.prng_key, pfree:float=1., sigma:float=0., **kwargs):
         keys = jax.random.split(key, 4)
@@ -59,7 +90,7 @@ class AsymConv(nnx.Conv):
         self.ssigma = sigma
         self.wasym = pfree<1.
         # Create params
-        if self.wasym: self.wmask = jax.random.bernoulli(keys[1], p=pfree, shape=self.kernel.shape[-1]).astype(self.param_dtype)
+        if self.wasym: self.wmask = mask_conv(*self.kernel.shape[1:], dtype=self.param_dtype)
         if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
         if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
 
