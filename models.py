@@ -26,7 +26,7 @@ def mask_linear_densest(in_dim, out_dim, **kwargs):
                 return mask
 def mask_linear_random(in_dim, out_dim, pfix, key, **kwargs):
     mask = jnp.ones((in_dim, out_dim), **kwargs)
-    nfix = int(pfix*in_dim)
+    nfix = max(1, int(in_dim**(1/4))) #int(pfix*in_dim)
     for row_idx, key in zip(range(out_dim), jax.random.split(key, out_dim)):
         zeros_in_row = jax.random.permutation(key, jnp.arange(in_dim))[:nfix]
         mask = mask.at[zeros_in_row, row_idx].set(0)
@@ -37,14 +37,14 @@ def mask_linear_random(in_dim, out_dim, pfix, key, **kwargs):
 class AsymLinear(nnx.Linear):
     def __init__(self, key:jax.dtypes.prng_key, wasym:str|None=None, kappa:float=1., sigma:float=0., **kwargs):
         keys = jax.random.split(key, 4)
-        super().__init__(rngs=nnx.Rngs(keys[0]), **kwargs)
+        super().__init__(rngs=nnx.Rngs(keys[0]), use_bias=True, **kwargs)
         # Check if asymmetry is to be applied
         self.ssigma = sigma
         self.wasym = bool(wasym)
         self.kappa = kappa
         # Create params
         if wasym=="densest": self.wmask = mask_linear_densest(*self.kernel.shape, dtype=self.param_dtype)
-        elif wasym=="random": self.wmask = mask_linear_random(*self.kernel.shape, key=keys[1], pfix=1/10, dtype=self.param_dtype)
+        elif wasym=="random": self.wmask = mask_linear_random(*self.kernel.shape, key=keys[1], pfix=1/3, dtype=self.param_dtype)
         if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
         if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
 
@@ -79,7 +79,6 @@ def mask_conv_densest(kernel_size, in_channels, out_channels, **kwargs):
     weights_per_out_channel = in_channels * kernel_size**2
     flat_idx_to_3d_idx = jax.vmap(lambda idx : [idx%kernel_size, (idx//kernel_size)%kernel_size, idx//kernel_size**2])
     out_channel_idx = 1
-
     for num_zeros in range(1, weights_per_out_channel):
         flat_cols_idxs = combinations(range(weights_per_out_channel), num_zeros) # not actually column, but rather (k_h, k_w, in_c)
         cols_idxs = map(flat_idx_to_3d_idx, map(jnp.array, flat_cols_idxs))
@@ -91,10 +90,10 @@ def mask_conv_densest(kernel_size, in_channels, out_channels, **kwargs):
 def mask_conv_random(kernel_size, in_channels, out_channels, key, pfix:float, **kwargs):
     mask = jnp.ones((kernel_size, kernel_size, in_channels, out_channels), **kwargs)
     weights_per_out_channel = in_channels * kernel_size**2
+    nfix = max(1, int(weights_per_out_channel**(1/4))) #int(pfix*weights_per_out_channel)
     flat_idx_to_3d_idx = jax.vmap(lambda idx : [idx%kernel_size, (idx//kernel_size)%kernel_size, idx//kernel_size**2])
-
     for out_channel_idx, key in zip(range(out_channels), jax.random.split(key, out_channels)):
-        flat_col_idxs = jax.random.permutation(key, jnp.arange(weights_per_out_channel))[:int(pfix*weights_per_out_channel)]
+        flat_col_idxs = jax.random.permutation(key, jnp.arange(weights_per_out_channel))[:nfix]
         col_idxs = flat_idx_to_3d_idx(flat_col_idxs)
         mask = mask.at[tuple(col_idxs) + (out_channel_idx,)].set(0)
     return mask
@@ -103,14 +102,14 @@ def mask_conv_random(kernel_size, in_channels, out_channels, key, pfix:float, **
 class AsymConv(nnx.Conv):
     def __init__(self, key:jax.dtypes.prng_key, wasym:str|None=None, kappa:float=1., sigma:float=0., **kwargs):
         keys = jax.random.split(key, 4)
-        super().__init__(rngs=nnx.Rngs(keys[0]), **kwargs)
+        super().__init__(rngs=nnx.Rngs(keys[0]), use_bias=True, **kwargs)
         # Check if asymmetry is to be applied
         self.ssigma = sigma
         self.wasym = bool(wasym)
         self.kappa = kappa
         # Create params
         if wasym=="densest": self.wmask = mask_conv_densest(*self.kernel.shape[1:], dtype=self.param_dtype)
-        elif wasym=="random": self.wmask = mask_conv_random(*self.kernel.shape[1:], key=keys[1], pfix=1/10, dtype=self.param_dtype)
+        elif wasym=="random": self.wmask = mask_conv_random(*self.kernel.shape[1:], key=keys[1], pfix=1/3, dtype=self.param_dtype)
         if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
         if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
 
@@ -192,7 +191,7 @@ class ResNetBlock(nnx.Module):
 
 # Resnet for ImageNet ([3,4,6,3] for 34 layers, [2,2,2,2] for 18 layers)
 class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
-    def __init__(self, key:jax.dtypes.prng_key, block=ResNetBlock, layers=[2,2,2,2], kernels=[64,128,256,512], channels_in=1, dim_out=9, dimexp=False, wasym:bool=False, kappa:float=1., sigma=0., **kwargs):
+    def __init__(self, key:jax.dtypes.prng_key, block=ResNetBlock, layers:tuple[int,...]=[2,2,2,2], kernels:tuple[int,...]=[64,128,256,512], channels_in:int=1, dim_out:int=9, dimexp:bool=False, wasym:str|None=None, kappa:float=1., sigma:float=0., **kwargs):
         super().__init__(**kwargs)
         # Dimension expansion params
         self.dimexp = dimexp
@@ -207,7 +206,7 @@ class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
                 k_out = kernels[j]
                 s = 2 if i==0 and j>0 else 1
                 self.layers.append(block(keys[j+(i*j)], k_in, k_out, stride=s, wasym=wasym, kappa=kappa, sigma=sigma))
-        self.fc = AsymLinear(keys[-1], wasym, kappa, sigma, in_features=kernels[-1]+3, out_features=dim_out, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
+        self.fc = nnx.Linear(rngs=nnx.Rngs(keys[-1]), in_features=kernels[-1]+3, out_features=dim_out, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
 
     def __call__(self, x, z, train=True):
         # Apply asymmetries (syre before wasym to avoid biasing the masks)
@@ -224,7 +223,7 @@ class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
 
 # LeNet-5 for 36X60 images + 3 auxiliary features
 class LeNet(nnx.Module):
-    def __init__(self, key:jax.dtypes.prng_key, dimexp=False, wasym=False, kappa=1., dim_out=2, sigma=0.):
+    def __init__(self, key:jax.dtypes.prng_key, dimexp=False, wasym=None, kappa=1., dim_out=2, sigma=0.):
         super().__init__()
         # Dimension expansion params
         flat_shape = 15*27 if dimexp else 6*12
@@ -235,7 +234,7 @@ class LeNet(nnx.Module):
         self.conv2 = AsymConv(keys[1], wasym, kappa, sigma, in_features=8, out_features=16, kernel_size=(4,4), padding="VALID")
         self.fc1 = AsymLinear(keys[2], wasym, kappa, sigma, in_features=flat_shape*16+3, out_features=128)
         self.fc2 = AsymLinear(keys[3], wasym, kappa, sigma, in_features=128, out_features=64)
-        self.fc3 = AsymLinear(keys[4], wasym, kappa, sigma, in_features=64, out_features=dim_out)
+        self.fc3 = nnx.Linear(rngs=nnx.Rngs(keys[4]), in_features=64, out_features=dim_out)
     
     def __call__(self, x, z, train=None):
         # Apply dimension expansion if necessary
