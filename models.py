@@ -15,7 +15,7 @@ def interleave(img):
 
 # Creates mask with the maximum number of non-zero weights while ensuring that each row is unique
 # https://github.com/cptq/asymmetric-networks/blob/main/lmc/models/models_mlp.py#L224
-def mask_linear(in_dim, out_dim, **kwargs):
+def mask_linear_densest(in_dim, out_dim, **kwargs):
     mask = jnp.ones((in_dim, out_dim), **kwargs)
     row_idx = 1
     for num_zeros in range(1, in_dim):
@@ -24,8 +24,7 @@ def mask_linear(in_dim, out_dim, **kwargs):
             row_idx += 1
             if row_idx >= out_dim:
                 return mask
-
-def mask_linear(in_dim, out_dim, pfix, key, **kwargs):
+def mask_linear_random(in_dim, out_dim, pfix, key, **kwargs):
     mask = jnp.ones((in_dim, out_dim), **kwargs)
     nfix = int(pfix*in_dim)
     for row_idx, key in zip(range(out_dim), jax.random.split(key, out_dim)):
@@ -36,21 +35,25 @@ def mask_linear(in_dim, out_dim, pfix, key, **kwargs):
 # W-Asymmetry implementation consistent with https://github.com/cptq/asymmetric-networks/blob/main/lmc/models/models_mlp.py#L169 
 # And SyRe implementation consistent with https://github.com/xu-yz19/syre/blob/main/MLP.ipynb
 class AsymLinear(nnx.Linear):
-    def __init__(self, key:jax.dtypes.prng_key, wasym:bool=False, kappa:float=1., sigma:float=0., **kwargs):
+    def __init__(self, key:jax.dtypes.prng_key, wasym:str|None=None, kappa:float=1., sigma:float=0., **kwargs):
         keys = jax.random.split(key, 4)
         super().__init__(rngs=nnx.Rngs(keys[0]), **kwargs)
         # Check if asymmetry is to be applied
         self.ssigma = sigma
-        self.wasym = wasym
+        self.wasym = bool(wasym)
         self.kappa = kappa
         # Create params
-        if wasym: self.wmask = mask_linear(*self.kernel.shape, key=keys[1], pfix=1/3, dtype=self.param_dtype)
-        if sigma>0. or wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
+        if wasym=="densest": self.wmask = mask_linear_densest(*self.kernel.shape, dtype=self.param_dtype)
+        elif wasym=="random": self.wmask = mask_linear_random(*self.kernel.shape, key=keys[1], pfix=1/10, dtype=self.param_dtype)
+        if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
         if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
 
     def __call__(self, inputs:jax.Array) -> jax.Array:
         kernel = self.kernel.value
         bias = self.bias.value
+        inputs, kernel, bias = self.promote_dtype(
+            (inputs, kernel, bias), dtype=self.dtype
+        )
         # Apply SyRe (before wasym to avoid biasing the masked weights)
         if self.ssigma>0.:
             bias = bias + self.randb * self.ssigma
@@ -59,9 +62,6 @@ class AsymLinear(nnx.Linear):
         if self.wasym:
             kernel = kernel * self.wmask + (1-self.wmask) * self.randk * self.kappa
         # Implementation directly copied from nnx.Linear
-        inputs, kernel, bias = self.promote_dtype(
-            (inputs, kernel, bias), dtype=self.dtype
-        )
         y = self.dot_general(
             inputs,
             kernel,
@@ -74,7 +74,7 @@ class AsymLinear(nnx.Linear):
 # Creates mask with the maximum number of non-zero weights while ensuring that each row is unique
 # Supports only square kernels
 # https://github.com/cptq/asymmetric-networks/blob/main/lmc/models/models_resnet.py#L173
-def mask_conv(kernel_size, in_channels, out_channels, **kwargs):
+def mask_conv_densest(kernel_size, in_channels, out_channels, **kwargs):
     mask = jnp.ones((kernel_size, kernel_size, in_channels, out_channels), **kwargs)
     weights_per_out_channel = in_channels * kernel_size**2
     flat_idx_to_3d_idx = jax.vmap(lambda idx : [idx%kernel_size, (idx//kernel_size)%kernel_size, idx//kernel_size**2])
@@ -88,8 +88,7 @@ def mask_conv(kernel_size, in_channels, out_channels, **kwargs):
                 return mask
             mask = mask.at[tuple(cols_idx) + (out_channel_idx,)].set(0)
             out_channel_idx += 1
-
-def mask_conv(kernel_size, in_channels, out_channels, key, pfix:float, **kwargs):
+def mask_conv_random(kernel_size, in_channels, out_channels, key, pfix:float, **kwargs):
     mask = jnp.ones((kernel_size, kernel_size, in_channels, out_channels), **kwargs)
     weights_per_out_channel = in_channels * kernel_size**2
     flat_idx_to_3d_idx = jax.vmap(lambda idx : [idx%kernel_size, (idx//kernel_size)%kernel_size, idx//kernel_size**2])
@@ -102,21 +101,25 @@ def mask_conv(kernel_size, in_channels, out_channels, key, pfix:float, **kwargs)
 
 # W-Asymmetry implementation consistent with https://github.com/cptq/asymmetric-networks/blob/main/lmc/models/models_resnet.py#L22
 class AsymConv(nnx.Conv):
-    def __init__(self, key:jax.dtypes.prng_key, wasym:bool=False, kappa:float=1., sigma:float=0., **kwargs):
+    def __init__(self, key:jax.dtypes.prng_key, wasym:str|None=None, kappa:float=1., sigma:float=0., **kwargs):
         keys = jax.random.split(key, 4)
         super().__init__(rngs=nnx.Rngs(keys[0]), **kwargs)
         # Check if asymmetry is to be applied
         self.ssigma = sigma
-        self.wasym = wasym
+        self.wasym = bool(wasym)
         self.kappa = kappa
         # Create params
-        if wasym: self.wmask = mask_conv(*self.kernel.shape[1:], key=keys[1], pfix=1/3, dtype=self.param_dtype)
-        if sigma>0. or wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
+        if wasym=="densest": self.wmask = mask_conv_densest(*self.kernel.shape[1:], dtype=self.param_dtype)
+        elif wasym=="random": self.wmask = mask_conv_random(*self.kernel.shape[1:], key=keys[1], pfix=1/10, dtype=self.param_dtype)
+        if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
         if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
 
     def __call__(self, inputs:jax.Array) -> jax.Array:
         kernel = self.kernel.value
         bias = self.bias.value
+        inputs, kernel, bias = self.promote_dtype(
+            (inputs, kernel, bias), dtype=self.dtype
+        )
         # Apply SyRe (before wasym to avoid biasing the masked weights)
         if self.ssigma>0.:
             bias = bias + self.randb * self.ssigma
@@ -125,20 +128,14 @@ class AsymConv(nnx.Conv):
         if self.wasym:
             kernel = kernel * self.wmask + (1-self.wmask) * self.randk * self.kappa
         # Implementation directly copied from nnx.Conv
-        inputs, kernel, bias = self.promote_dtype(
-            (inputs, kernel, bias), dtype=self.dtype
-        )
-        def maybe_broadcast(x: int | tuple[int, ...]):
-            if isinstance(x, int):
-                return (x,) * len(self.kernel_size)
-            return tuple(x)
+        broadcast = lambda x: (x,) * len(self.kernel_size) if isinstance(x, int) else tuple(x)
         y = self.conv_general_dilated(
             inputs,
             kernel,
-            maybe_broadcast(self.strides),
-            self.padding, # NOTE: restricted to "SAME" or "VALID"
-            lhs_dilation=maybe_broadcast(self.input_dilation),
-            rhs_dilation=maybe_broadcast(self.kernel_dilation),
+            broadcast(self.strides), 
+            self.padding, # restricted to "SAME" or "VALID"
+            lhs_dilation=broadcast(self.input_dilation),
+            rhs_dilation=broadcast(self.kernel_dilation),
             dimension_numbers=_conv_dimension_numbers(inputs.shape),
             feature_group_count=self.feature_group_count,
             precision=self.precision,
@@ -227,7 +224,7 @@ class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
 
 # LeNet-5 for 36X60 images + 3 auxiliary features
 class LeNet(nnx.Module):
-    def __init__(self, key:jax.dtypes.prng_key, dimexp=False, wasym=False, kappa=1., dim_out=9, sigma=0.):
+    def __init__(self, key:jax.dtypes.prng_key, dimexp=False, wasym=False, kappa=1., dim_out=2, sigma=0.):
         super().__init__()
         # Dimension expansion params
         flat_shape = 15*27 if dimexp else 6*12
