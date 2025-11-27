@@ -45,6 +45,7 @@ class AsymLinear(nnx.Linear):
         # Create params
         if wasym=="densest": self.wmask = mask_linear_densest(*self.kernel.shape, dtype=self.param_dtype)
         elif wasym=="random": self.wmask = mask_linear_random(*self.kernel.shape, key=keys[1], pfix=1/3, dtype=self.param_dtype)
+        # elif wasym=="random": self.wmask = jax.random.bernoulli(keys[1], p=2/3., shape=self.kernel.shape).astype(self.param_dtype)
         if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
         if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
 
@@ -54,13 +55,15 @@ class AsymLinear(nnx.Linear):
         inputs, kernel, bias = self.promote_dtype(
             (inputs, kernel, bias), dtype=self.dtype
         )
-        # Apply SyRe (before wasym to avoid biasing the masked weights)
+        # Apply w-asymmetry
+        # Notice the overwrite, because the graph must be disrupted
+        # That is also why syre is applied afterwards
+        if self.wasym:
+            kernel = self.kernel.value = kernel * self.wmask + (1-self.wmask) * self.randk * self.kappa
+        # Apply SyRe (mask to avoid biasing the masked weights)
         if self.ssigma>0.:
             bias = bias + self.randb * self.ssigma
-            kernel = kernel + self.randk * self.ssigma
-        # Apply w-asymmetry
-        if self.wasym:
-            kernel = kernel * self.wmask + (1-self.wmask) * self.randk * self.kappa
+            kernel = kernel + self.randk * self.ssigma  * (1. if not self.wasym else self.wmask)
         # Implementation directly copied from nnx.Linear
         y = self.dot_general(
             inputs,
@@ -110,6 +113,7 @@ class AsymConv(nnx.Conv):
         # Create params
         if wasym=="densest": self.wmask = mask_conv_densest(*self.kernel.shape[1:], dtype=self.param_dtype)
         elif wasym=="random": self.wmask = mask_conv_random(*self.kernel.shape[1:], key=keys[1], pfix=1/3, dtype=self.param_dtype)
+        # elif wasym=="random": self.wmask = jax.random.bernoulli(keys[1], p=2/3., shape=self.kernel.shape[-1]).astype(self.param_dtype)
         if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
         if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
 
@@ -119,13 +123,15 @@ class AsymConv(nnx.Conv):
         inputs, kernel, bias = self.promote_dtype(
             (inputs, kernel, bias), dtype=self.dtype
         )
-        # Apply SyRe (before wasym to avoid biasing the masked weights)
+        # Apply w-asymmetry
+        # Notice the overwrite, because the graph must be disrupted
+        # That is also why syre is applied afterwards
+        if self.wasym:
+            kernel = self.kernel.value = kernel * self.wmask + (1-self.wmask) * self.randk * self.kappa
+        # Apply SyRe (mask to avoid biasing the masked weights)
         if self.ssigma>0.:
             bias = bias + self.randb * self.ssigma
-            kernel = kernel + self.randk * self.ssigma
-        # Apply w-asymmetry
-        if self.wasym:
-            kernel = kernel * self.wmask + (1-self.wmask) * self.randk * self.kappa
+            kernel = kernel + self.randk * self.ssigma  * (1. if not self.wasym else self.wmask)
         # Implementation directly copied from nnx.Conv
         broadcast = lambda x: (x,) * len(self.kernel_size) if isinstance(x, int) else tuple(x)
         y = self.conv_general_dilated(
@@ -191,7 +197,7 @@ class ResNetBlock(nnx.Module):
 
 # Resnet for ImageNet ([3,4,6,3] for 34 layers, [2,2,2,2] for 18 layers)
 class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
-    def __init__(self, key:jax.dtypes.prng_key, block=ResNetBlock, layers:tuple[int,...]=[2,2,2,2], kernels:tuple[int,...]=[64,128,256,512], channels_in:int=1, dim_out:int=9, dimexp:bool=False, wasym:str|None=None, kappa:float=1., sigma:float=0., **kwargs):
+    def __init__(self, key:jax.dtypes.prng_key, layers:tuple[int,...]=[2,2,2,2], kernels:tuple[int,...]=[64,128,256,512], channels_in:int=1, dim_out:int=9, dimexp:bool=False, wasym:str|None=None, kappa:float=1., sigma:float=0., **kwargs):
         super().__init__(**kwargs)
         # Dimension expansion params
         self.dimexp = dimexp
@@ -205,8 +211,8 @@ class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
                 k_in = ([64]+kernels)[j] if i==0 else kernels[j]
                 k_out = kernels[j]
                 s = 2 if i==0 and j>0 else 1
-                self.layers.append(block(keys[j+(i*j)], k_in, k_out, stride=s, wasym=wasym, kappa=kappa, sigma=sigma))
-        self.fc = nnx.Linear(rngs=nnx.Rngs(keys[-1]), in_features=kernels[-1]+3, out_features=dim_out, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
+                self.layers.append(ResNetBlock(keys[j+(i*j)], k_in, k_out, stride=s, wasym=wasym, kappa=kappa, sigma=sigma))
+        self.fc = AsymLinear(keys[-1], wasym, kappa, sigma, in_features=kernels[-1]+3, out_features=dim_out, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
 
     def __call__(self, x, z, train=True):
         # Apply asymmetries (syre before wasym to avoid biasing the masks)
@@ -234,7 +240,7 @@ class LeNet(nnx.Module):
         self.conv2 = AsymConv(keys[1], wasym, kappa, sigma, in_features=8, out_features=16, kernel_size=(4,4), padding="VALID")
         self.fc1 = AsymLinear(keys[2], wasym, kappa, sigma, in_features=flat_shape*16+3, out_features=128)
         self.fc2 = AsymLinear(keys[3], wasym, kappa, sigma, in_features=128, out_features=64)
-        self.fc3 = nnx.Linear(rngs=nnx.Rngs(keys[4]), in_features=64, out_features=dim_out)
+        self.fc3 = AsymLinear(keys[4], wasym, kappa, sigma, in_features=64, out_features=dim_out)
     
     def __call__(self, x, z, train=None):
         # Apply dimension expansion if necessary
