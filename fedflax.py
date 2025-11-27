@@ -72,8 +72,7 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="earl
         local_val_losses = []
         local_patience = 1
         epoch = 0
-        while (epoch!=local_epochs) if isinstance(rounds, int) else (local_patience<=max_patience):
-            print(epoch, local_epochs, epoch!=local_epochs)
+        while (epoch!=local_epochs) if isinstance(local_epochs, int) else (local_patience<=max_patience):
             # Collect and save params for visualization
             if filename: save(models, filename, n, overwrite=(r==0 and epoch==0))
             # Iterate over batches
