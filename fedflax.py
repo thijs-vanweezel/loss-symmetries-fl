@@ -73,6 +73,7 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="earl
         local_patience = 1
         epoch = 0
         while (epoch!=local_epochs) if isinstance(rounds, int) else (local_patience<=max_patience):
+            print(epoch, local_epochs, epoch!=local_epochs)
             # Collect and save params for visualization
             if filename: save(models, filename, n, overwrite=(r==0 and epoch==0))
             # Iterate over batches
@@ -81,9 +82,6 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="earl
                 bar.set_description(f"Batch loss: {loss.mean():.4f}. Round {r} Epoch {epoch+1}/{local_epochs}")
             # Evaluate on local validation
             if local_epochs=="early":
-                globals()['ms'] = models  # For debugging
-                globals()['ds'] = ds_val  # For debugging
-                globals()['vf'] = local_val_fn  # For debugging
                 val = reduce(lambda a,b: a+local_val_fn(models, *b).mean(), ds_val, 0.)
                 local_val_losses.append(val / len(ds_val))
                 # Check if local models are converged
