@@ -144,7 +144,7 @@ class AsymConv(nnx.Conv):
 
 # Used in resnet
 class ResNetBlock(nnx.Module):
-    def __init__(self, key:jax.dtypes.prng_key, in_kernels:int, out_kernels:int, stride:int=1, wasym:bool=False, kappa:float=1., sigma:float=0.):
+    def __init__(self, key:jax.dtypes.prng_key, in_kernels:int, out_kernels:int, stride:int=1, wasym:bool=False, kappa:float=1., sigma:float=0., activation=nnx.relu):
         super().__init__()
         keys = jax.random.split(key, 5)
         self.stride = stride
@@ -162,6 +162,7 @@ class ResNetBlock(nnx.Module):
             dtype=jnp.bfloat16
         )
         self.norm1 = nnx.BatchNorm(out_kernels, rngs=nnx.Rngs(keys[1]), param_dtype=jnp.float32, dtype=jnp.bfloat16)
+        self.activation = activation
         self.conv2 = AsymConv(
             keys[2],
             wasym,
@@ -183,7 +184,7 @@ class ResNetBlock(nnx.Module):
         res = x if self.stride==1 else self.id_conv(x)
         x = self.conv1(x)
         x = self.norm1(x, use_running_average=not train)
-        x = nnx.relu(x)
+        x = self.activation(x)
         x = self.conv2(x)
         x = self.norm2(x, use_running_average=not train)
         x = res+x
@@ -191,7 +192,7 @@ class ResNetBlock(nnx.Module):
 
 # Resnet for ImageNet ([3,4,6,3] for 34 layers, [2,2,2,2] for 18 layers)
 class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
-    def __init__(self, key:jax.dtypes.prng_key, layers:tuple[int,...]=[2,2,2,2], kernels:tuple[int,...]=[64,128,256,512], channels_in:int=1, dim_out:int=9, dimexp:bool=False, wasym:str|None=None, kappa:float=1., sigma:float=0., **kwargs):
+    def __init__(self, key:jax.dtypes.prng_key, layers:tuple[int,...]=[2,2,2,2], kernels:tuple[int,...]=[64,128,256,512], channels_in:int=1, dim_out:int=9, dimexp:bool=False, wasym:str|None=None, kappa:float=1., sigma:float=0., activation=nnx.relu, **kwargs):
         super().__init__(**kwargs)
         # Dimension expansion params
         self.dimexp = dimexp
@@ -199,13 +200,14 @@ class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
         keys = jax.random.split(key, sum(layers)+2)
         # Layers
         self.conv = AsymConv(keys[0], wasym, kappa, sigma, in_features=channels_in, out_features=64, kernel_size=(7,7), strides=(2,2), padding="SAME", param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
+        self.activation = activation
         self.layers = []
         for j, l in enumerate(layers):
             for i in range(l):
                 k_in = ([64]+kernels)[j] if i==0 else kernels[j]
                 k_out = kernels[j]
                 s = 2 if i==0 and j>0 else 1
-                self.layers.append(ResNetBlock(keys[j+(i*j)], k_in, k_out, stride=s, wasym=wasym, kappa=kappa, sigma=sigma))
+                self.layers.append(ResNetBlock(keys[j+(i*j)], k_in, k_out, stride=s, wasym=wasym, kappa=kappa, sigma=sigma, activation=activation))
         self.fc = AsymLinear(keys[-1], wasym, kappa, sigma, in_features=kernels[-1]+3, out_features=dim_out, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
 
     def __call__(self, x, z, train=True):
@@ -213,7 +215,7 @@ class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
         x = x if not self.dimexp else interleave(x)
         # Forward pass
         x = self.conv(x)
-        x = nnx.relu(x)
+        x = self.activation(x)
         x = nnx.max_pool(x, window_shape=(3,3), strides=(2,2), padding="SAME")
         for layer in self.layers:
             x = layer(x, train=train)
@@ -223,11 +225,12 @@ class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
 
 # LeNet-5 for 36X60 images + 3 auxiliary features
 class LeNet(nnx.Module):
-    def __init__(self, key:jax.dtypes.prng_key, dimexp=False, wasym=None, kappa=1., dim_out=2, sigma=0.):
+    def __init__(self, key:jax.dtypes.prng_key, dimexp=False, wasym=None, kappa=1., dim_out=2, sigma=0., activation=nnx.relu):
         super().__init__()
         # Dimension expansion params
         flat_shape = 15*27 if dimexp else 6*12
         self.dimexp = dimexp
+        self.activation = activation
         # Layers
         keys = jax.random.split(key, 5)
         self.conv1 = AsymConv(keys[0], wasym, kappa, sigma, in_features=1, out_features=8, kernel_size=(4,4), padding="VALID")
@@ -241,17 +244,17 @@ class LeNet(nnx.Module):
         x = x if not self.dimexp else interleave(x)
         # Forward pass
         x = self.conv1(x)
-        x = nnx.relu(x)
+        x = self.activation(x)
         x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
         x = self.conv2(x)
-        x = nnx.relu(x)
+        x = self.activation(x)
         x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
         x = jnp.reshape(x, (x.shape[0], -1))
         x = jnp.concatenate([x, z], axis=-1)
         x = self.fc1(x)
-        x = nnx.relu(x)
+        x = self.activation(x)
         x = self.fc2(x)
-        x = nnx.relu(x)
+        x = self.activation(x)
         x = self.fc3(x)
         return x
 
