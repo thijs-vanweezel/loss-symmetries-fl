@@ -42,7 +42,7 @@ def compute_surface(alpha_grid, beta_grid, pca, reconstruct, ds, val_fn, interpo
             model = reconstruct(params)
             # Compute accuracy
             score = reduce(lambda score, b: score + val_fn(model,*b), ds, 0.) / len(ds)
-            errs = errs.at[i,j].set(1-score.mean()) # mean over clients' data, i.e., global data error rate
+            errs = errs.at[i,j].set(score.mean()) # mean over clients' data, i.e., global data error rate
     
     if interpolate:
         alpha_grid_fine = np.linspace(alpha_grid.min(), alpha_grid.max(), 1000)
@@ -58,7 +58,7 @@ def plot_trajectory(errs, model_idx, epochs, reduced_params, alpha_grid, beta_gr
     fig.tight_layout()
     ax.set_box_aspect(1)
     # Plot the level sets, exponential scale
-    norm = mpl.colors.Normalize(vmin=.5, vmax=.8) # TODO: 0.5 error is pretty bad
+    norm = mpl.colors.Normalize(vmin=5., vmax=15.)
     plot = ax.pcolormesh(
         alpha_grid,
         beta_grid,
@@ -85,7 +85,7 @@ def plot_trajectory(errs, model_idx, epochs, reduced_params, alpha_grid, beta_gr
     # Display accuracy of final aggregated model
     aggr_coords = reduced_params[-1]
     aggr_coords_discrete = jnp.argmin(jnp.abs(alpha_grid - aggr_coords[0])), jnp.argmin(jnp.abs(beta_grid - aggr_coords[1]))
-    ax.annotate(f"{int(errs[aggr_coords_discrete]*100.)}\%", xy=aggr_coords, c="k", fontsize=25)
+    ax.annotate(f"{int(errs[aggr_coords_discrete])}°", xy=aggr_coords, c="k", fontsize=25)
     # Show
     if labels:
         handles, labels = ax.get_legend_handles_labels()
