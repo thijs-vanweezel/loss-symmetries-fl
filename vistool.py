@@ -33,6 +33,7 @@ def get_reconstruct(model, client_dim=True):
     return reconstruct
 
 def compute_surface(alpha_grid, beta_grid, pca, reconstruct, ds, val_fn, interpolate=True):
+    val_fn = nnx.jit(nnx.vmap(val_fn, in_axes=(None,0,0,0)))
     errs = jnp.zeros((len(alpha_grid), len(beta_grid)))
     for i, alpha_ in enumerate(alpha_grid):
         for j, beta_ in enumerate(beta_grid):
