@@ -37,7 +37,7 @@ def mask_linear_random(in_dim, out_dim, pfix, key, **kwargs):
 class AsymLinear(nnx.Linear):
     def __init__(self, in_features:int, out_features:int, key:jax.dtypes.prng_key, wasym:str|None=None, kappa:float=1., sigma:float=0., orderbias:bool=False, **kwargs):
         keys = jax.random.split(key, 4)
-        super().__init__(in_features, out_features, rngs=nnx.Rngs(keys[0]), use_bias=False if orderbias else True, **kwargs)
+        super().__init__(in_features, out_features, rngs=nnx.Rngs(keys[0]), use_bias=True, **kwargs)
         # Check if asymmetry is to be applied
         self.ssigma = sigma
         self.wasym = bool(wasym)
@@ -48,17 +48,14 @@ class AsymLinear(nnx.Linear):
         elif wasym=="random": self.wmask = mask_linear_random(*self.kernel.shape, key=keys[1], pfix=1/3, dtype=self.param_dtype)
         if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
         if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
-        if orderbias: 
-            self.bias_unconstrained = nnx.Param(jnp.zeros((1,), dtype=self.param_dtype))
-            self.bias_log_diffs = nnx.Param(jnp.zeros((out_features-1,), dtype=self.param_dtype))
 
     def __call__(self, inputs:jax.Array) -> jax.Array:
         kernel = self.kernel.value
         # Order bias to counter permutation symmetry
-        if self.orderbias:
-            bias_diffs = jnp.exp(self.bias_log_diffs.value)
-            bias = self.bias_unconstrained.value + jnp.cumsum(bias_diffs)
-            bias = jnp.concatenate([self.bias_unconstrained.value,  bias])
+        if self.orderbias: bias = jnp.concatenate([
+            self.bias.value[0:1],
+            jnp.cumsum(jnp.exp(self.bias.value[1:])) + self.bias.value[0:1]
+        ])
         else: bias = self.bias.value
         # Apply SyRe (before wasym to avoid biasing the masked weights)
         if self.ssigma>0.:
@@ -111,7 +108,7 @@ def mask_conv_random(kernel_size, in_channels, out_channels, key, pfix:float, **
 class AsymConv(nnx.Conv):
     def __init__(self, in_features:int, out_features:int, key:jax.dtypes.prng_key, wasym:str|None=None, kappa:float=1., sigma:float=0., orderbias:bool=False, **kwargs):
         keys = jax.random.split(key, 4)
-        super().__init__(in_features, out_features, rngs=nnx.Rngs(keys[0]), use_bias=False if orderbias else True, **kwargs)
+        super().__init__(in_features, out_features, rngs=nnx.Rngs(keys[0]), use_bias=True, **kwargs)
         # Check if asymmetry is to be applied
         self.ssigma = sigma
         self.wasym = bool(wasym)
@@ -122,17 +119,14 @@ class AsymConv(nnx.Conv):
         elif wasym=="random": self.wmask = mask_conv_random(*self.kernel.shape[1:], key=keys[1], pfix=1/3, dtype=self.param_dtype)
         if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
         if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
-        if orderbias: 
-            self.bias_unconstrained = nnx.Param(jnp.zeros((1,), dtype=self.param_dtype))
-            self.bias_log_diffs = nnx.Param(jnp.zeros((out_features-1,), dtype=self.param_dtype))
 
     def __call__(self, inputs:jax.Array) -> jax.Array:
         kernel = self.kernel.value
         # Order bias to counter permutation symmetry
-        if self.orderbias:
-            bias_diffs = jnp.exp(self.bias_log_diffs.value)
-            bias = self.bias_unconstrained.value + jnp.cumsum(bias_diffs)
-            bias = jnp.concatenate([self.bias_unconstrained.value,  bias])
+        if self.orderbias: bias = jnp.concatenate([
+            self.bias.value[0:1],
+            jnp.cumsum(jnp.exp(self.bias.value[1:])) + self.bias.value[0:1]
+        ])
         else: bias = self.bias.value
         # Apply SyRe (before wasym to avoid biasing the masked weights)
         if self.ssigma>0.:
