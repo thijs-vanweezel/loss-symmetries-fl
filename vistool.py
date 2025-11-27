@@ -15,9 +15,6 @@ plt.rcParams.update({
     """
 })
 
-# Utils
-acc_fn = nnx.jit(nnx.vmap(lambda m,x,z,y: (m(x,z,train=False).argmax(-1)==y.argmax(-1)).mean(), in_axes=(None,0,0,0)))
-
 def get_reconstruct(model, client_dim=True):
     # Function to reconstruct model from flat params
     params, struct = jax.tree.flatten(nnx.to_tree(model))
@@ -35,7 +32,7 @@ def get_reconstruct(model, client_dim=True):
         return nnx.from_tree(jax.tree.unflatten(struct, params))
     return reconstruct
 
-def compute_surface(alpha_grid, beta_grid, pca, reconstruct, ds, acc_fn=acc_fn, interpolate=True):
+def compute_surface(alpha_grid, beta_grid, pca, reconstruct, ds, val_fn, interpolate=True):
     errs = jnp.zeros((len(alpha_grid), len(beta_grid)))
     for i, alpha_ in enumerate(alpha_grid):
         for j, beta_ in enumerate(beta_grid):
@@ -43,8 +40,8 @@ def compute_surface(alpha_grid, beta_grid, pca, reconstruct, ds, acc_fn=acc_fn, 
             params = pca.inverse_transform(jnp.array([[alpha_, beta_]])).reshape(-1)
             model = reconstruct(params)
             # Compute accuracy
-            acc = reduce(lambda acc, b: acc + acc_fn(model,*b), ds, 0.) / len(ds)
-            errs = errs.at[i,j].set(1-acc.mean()) # mean over clients' data, i.e., global data error rate
+            score = reduce(lambda score, b: score + val_fn(model,*b), ds, 0.) / len(ds)
+            errs = errs.at[i,j].set(1-score.mean()) # mean over clients' data, i.e., global data error rate
     
     if interpolate:
         alpha_grid_fine = np.linspace(alpha_grid.min(), alpha_grid.max(), 1000)
