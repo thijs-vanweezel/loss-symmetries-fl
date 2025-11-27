@@ -101,11 +101,11 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="earl
             val_losses.append(val)       
             print(f"round {r} ({epoch} local epochs); global validation score: {val:.4f}")
             # Check if model is converged
-            r += 1
             if r>1 and val>=val_losses[-patience-1]:
                 patience += 1
             else:
                 patience = 1
+        r += 1
     
     # Save final params
     if filename: save(cast(model_g, n), filename, n, overwrite=False)
