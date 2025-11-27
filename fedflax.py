@@ -46,53 +46,69 @@ def cast(model_g, n):
     models = nnx.from_tree(jax.tree.unflatten(struct, params_all))
     return models
 
-def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs,filename=None, n=4, max_patience=None, rounds=None, val_fn=None):
+def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="early", filename:str=None, n=4, max_patience:int=None, rounds:int|str="early", val_fn=None):
     # Parallelize train step
     train_step = return_train_step(ell)
     # Validation function that can be used as stand-alone
     # NOTE: For patience purposes, must be a Minimization metric
+    local_val_fn = nnx.jit(nnx.vmap(
+        val_fn or err_fn, in_axes=0
+    ))
     val_fn = nnx.jit(nnx.vmap(
-        val_fn or err_fn
+        val_fn or err_fn, in_axes=(None,0,0,0)
     ))
 
     # Communication rounds
-    losses = jnp.zeros((0,n+1)) # last column for validation loss
+    val_losses = []
     r = 0
     patience = 1
-    while r!=rounds and (max_patience is None or r<=1 or patience<=max_patience):
+    while (r!=rounds) if isinstance(rounds, int) else (patience<=max_patience):
         # Parallelize global model and optimizers
         models = cast(model_g, n)
         if r==0:
             opts = nnx.vmap(opt_create)(models)
         
         # Local training
-        losses = jnp.concat([losses, jnp.zeros((1,n+1))])
-        for epoch in range(local_epochs): # TODO: should allow for early stopping
+        local_val_losses = []
+        local_patience = 1
+        epoch = 0
+        while (epoch!=local_epochs) if isinstance(rounds, int) else (local_patience<=max_patience):
             # Collect and save params for visualization
             if filename: save(models, filename, n, overwrite=(r==0 and epoch==0))
             # Iterate over batches
             for x_batch, z_batch, y_batch in (bar := tqdm(ds_train, leave=False)):
                 loss = train_step(models, model_g, opts, x_batch, z_batch, y_batch)
-                losses = losses.at[-1,:-1].set(losses[-1,:-1] + loss)
                 bar.set_description(f"Batch loss: {loss.mean():.4f}. Round {r} Epoch {epoch+1}/{local_epochs}")
-
-        # Evaluate
-        losses = losses.at[-1,:-1].set(losses[-1,:-1]/local_epochs/len(ds_train))    
-        val = reduce(lambda a,b: a+val_fn(models, *b).mean(), ds_val, 0.)
-        val /= len(ds_val)
-        losses = losses.at[-1, -1].set(val)
-        print(f"round {r} validation score (mean over clients): {val:.4f}")
+            # Evaluate on local validation
+            if local_epochs=="early":
+                globals()['ms'] = models  # For debugging
+                globals()['ds'] = ds_val  # For debugging
+                globals()['vf'] = local_val_fn  # For debugging
+                val = reduce(lambda a,b: a+local_val_fn(models, *b).mean(), ds_val, 0.)
+                local_val_losses.append(val / len(ds_val))
+                # Check if local models are converged
+                if epoch>1 and val>=local_val_losses[-local_patience-1]:
+                    local_patience += 1
+                else:
+                    local_patience = 1
+            epoch += 1
         
         # Aggregate
         updates = get_updates(model_g, models)
         model_g = aggregate(model_g, updates)
         
-        # Check if model is converged
-        r += 1
-        if r>1 and val>=losses[-patience-1,-1]:
-            patience += 1
-        else:
-            patience = 1
+        if rounds=="early":
+            # Evaluate aggregated model
+            val = reduce(lambda a,b: a+val_fn(model_g, *b).mean(), ds_val, 0.)
+            val /= len(ds_val)
+            val_losses.append(val)       
+            print(f"round {r} ({epoch} local epochs); global validation score: {val:.4f}")
+            # Check if model is converged
+            r += 1
+            if r>1 and val>=val_losses[-patience-1]:
+                patience += 1
+            else:
+                patience = 1
     
     # Save final params
     if filename: save(cast(model_g, n), filename, n, overwrite=False)
