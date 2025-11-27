@@ -1,5 +1,5 @@
 from scipy.io import loadmat
-import os, torch, shutil
+import os, torch, shutil, torchvision
 from torch.utils.data import Dataset, DataLoader, default_collate
 from jax import numpy as jnp
 from functools import partial
@@ -29,8 +29,7 @@ def preprocess(original_path="MPIIGaze/MPIIGaze/Data/Normalized", new_path="MPII
 
 class MPIIGaze(Dataset):
     def __init__(self, path:str, n_clients:int, discrete:bool):
-        self.discrete = discrete
-        self.n_clients = n_clients
+        # Each client gets data from one participant
         g = os.walk(path)
         self.clients = next(g)[1][:n_clients]
         self.files = {c: [] for c in self.clients}
@@ -38,6 +37,8 @@ class MPIIGaze(Dataset):
             if os.path.basename(dirname) in self.clients:
                 for f in filenames:
                     self.files[os.path.basename(dirname)].append(os.path.join(dirname, f))
+        self.discrete = discrete
+        self.n_clients = n_clients
 
     def __len__(self):
         # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
@@ -68,6 +69,36 @@ class MPIIGaze(Dataset):
         label = torch.eye(nr*nr)[label] # one-hot encode
         return img, aux, label
 
+class ImageNet(Dataset):
+    def __init__(self, path:str="./imagenet/Data/CLS-LOC/val/", n_clients:int=4):
+        # Evenly divide all labels among clients
+        g = os.walk(path)
+        classes = next(g)[1]
+        k, m = divmod(len(classes), n_clients)
+        class_splits = {classes[idx]: c for c in range(n_clients) for idx in range(c*k+min(c,m), (c+1)*k+min(c+1,m))}
+        self.data = {c: [] for c in range(n_clients)}
+        for label, (dirname, _, filelist) in enumerate(g):
+            client = class_splits[os.path.basename(dirname)]
+            filelist = [(label, dirname, f) for f in filelist]
+            self.data[client].extend(filelist)
+        self.n_clients = n_clients
+
+    def __len__(self):
+        return min([len(files) for files in self.data.values()])*self.n_clients
+    
+    def __getitem__(self, idx):
+        # Load datum
+        c = idx % self.n_clients
+        i = idx // self.n_clients
+        label, dirname, filename = self.data[c][i]
+        # Load image
+        img = torchvision.io.decode_image(os.path.join(dirname, filename), mode="RGB").float() / 255.
+        img = torchvision.transforms.Resize((128,128))(img)
+        img = img.swapaxes(0,2)
+        # One-hot encode labels
+        label = torch.eye(1000)[label]
+        return img, label
+
 def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
     Only one type of skew can be applied at a time, with the following options:
@@ -76,8 +107,10 @@ def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.nda
     - "label": where indiv_frac==1 corresponds to clients having disjoint label distributions.
     """
     # Collect, convert, and concat
-    imgs, auxs, labels = zip(*batch)
-    auxs = jnp.stack([jnp.asarray(aux, dtype=jnp.float32) for aux in auxs])
+    aux = not len(batch[0])==2
+    if aux: imgs, auxs, labels = zip(*batch)
+    else: imgs, labels = zip(*batch)
+    if aux: auxs = jnp.stack([jnp.asarray(aux, dtype=jnp.float32) for aux in auxs])
     imgs = jnp.stack([jnp.asarray(img, dtype=jnp.float32) for img in imgs])
     labels = jnp.stack([jnp.asarray(label, dtype=jnp.float32) for label in labels])
 
@@ -85,7 +118,7 @@ def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.nda
     if skew=="feature":
         indiv_stop = int(indiv_frac*len(imgs)*n_clients)
         clients_idxs = [jnp.asarray(list(range(i, indiv_stop, n_clients)) + list(range(indiv_stop, len(imgs)))) for i in range(n_clients)]
-        clients_auxs = [auxs[idxs] for idxs in clients_idxs]
+        if aux: clients_auxs = [auxs[idxs] for idxs in clients_idxs]
         clients_imgs = [imgs[idxs] for idxs in clients_idxs]
         clients_labels = [labels[idxs] for idxs in clients_idxs]
     
@@ -93,7 +126,7 @@ def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.nda
     elif skew=="overlap":
         n_indiv = int(indiv_frac*len(imgs))
         clients_idxs = [jnp.asarray(list(range(i*n_indiv, (i+1)*n_indiv)) + list(range(n_clients*n_indiv, len(imgs)))) for i in range(n_clients)]
-        clients_auxs = [auxs[idxs] for idxs in clients_idxs]
+        if aux: clients_auxs = [auxs[idxs] for idxs in clients_idxs]
         clients_imgs = [imgs[idxs] for idxs in clients_idxs]
         clients_labels = [labels[idxs] for idxs in clients_idxs]
 
@@ -108,14 +141,14 @@ def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.nda
         indiv_idxs = [list(sorted_idxs[i*group_size:(i+1)*group_size]) for i in range(n_clients)]
         shared_idxs = list(range(indiv_stop, len(imgs)))
         # Select
-        clients_auxs = [auxs[jnp.asarray(idxs + shared_idxs)] for idxs in indiv_idxs]
+        if aux: clients_auxs = [auxs[jnp.asarray(idxs + shared_idxs)] for idxs in indiv_idxs]
         clients_imgs = [imgs[jnp.asarray(idxs + shared_idxs)] for idxs in indiv_idxs]
         clients_labels = [labels[jnp.asarray(idxs + shared_idxs)] for idxs in indiv_idxs]
 
-    return jnp.stack(clients_imgs, 0), jnp.stack(clients_auxs, 0), jnp.stack(clients_labels, 0)
+    if aux: return jnp.stack(clients_imgs, 0), jnp.stack(clients_auxs, 0), jnp.stack(clients_labels, 0)
+    return jnp.stack(clients_imgs, 0), jnp.stack(clients_labels, 0)
 
-def get_gaze(skew:str="feature", batch_size=128, n_clients=4, beta:float=0, path="MPIIGaze_preprocessed", partition="train", discrete:bool=True, **kwargs)->DataLoader:
-    assert skew in ["feature", "overlap", "label"], "Skew must be one of 'feature', 'overlap', or 'label'. For no skew, specify beta=0."
+def get_data(skew:str="feature", batch_size=128, n_clients=4, beta:float=0, path="MPIIGaze_preprocessed", partition="train", discrete:bool|None=False, **kwargs)->DataLoader:
     assert beta>=0 and beta<=1, "Beta must be between 0 and 1"
     beta = 1-beta if skew=="overlap" else beta
     # Fractions derived
@@ -123,9 +156,16 @@ def get_gaze(skew:str="feature", batch_size=128, n_clients=4, beta:float=0, path
     n_shared = batch_size-n_indiv 
     new_batch_size = n_indiv*n_clients + n_shared
     indiv_frac = n_indiv / new_batch_size
+    # Dataset type
+    if "MPIIGaze" in path:
+        dataset = MPIIGaze(n_clients=n_clients, path=os.path.join(path, partition), discrete=discrete)
+        assert skew in ["feature", "overlap", "label"], "Skew must be one of 'feature', 'overlap', or 'label'. For no skew, specify beta=0."
+    else:
+        dataset = ImageNet(path=os.path.join(path, partition), n_clients=n_clients)
+        assert skew in ["overlap", "label"], "Skew must be either 'overlap' or 'label'. For no skew, specify beta=0."
     # Iterable batches
     return DataLoader(
-        MPIIGaze(n_clients=n_clients, path=os.path.join(path, partition), discrete=discrete),
+        dataset,
         batch_size=new_batch_size,
         collate_fn=partial(jax_collate, n_clients=n_clients, indiv_frac=indiv_frac, skew=skew),
         shuffle=False,
