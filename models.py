@@ -252,7 +252,7 @@ class ResNet(nnx.Module):
                 s = 2 if i==0 and j>0 else 1
                 self.layers.append(ResNetBlock(keys[j+(i*j)], k_in, k_out, stride=s, wasym=wasym, kappa=kappa, sigma=sigma, 
                                                activation=activation, orderbias=orderbias, normkernel=normkernel))
-        self.fc = AsymLinear(kernels[-1], dim_out, keys[-1], wasym, kappa, sigma, orderbias, normkernel, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
+        self.fc = AsymLinear(kernels[-1], dim_out, keys[-1], wasym, kappa, sigma, orderbias, normkernel=False, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
 
     def __call__(self, x, z=None, train=True):
         # Apply dimension expansion if desired
@@ -283,7 +283,7 @@ class LeNet(nnx.Module):
         self.conv2 = AsymConv(8, 16, keys[1], wasym, kappa, sigma, orderbias, normkernel, kernel_size=(4,4), padding="VALID")
         self.fc1 = AsymLinear(flat_shape*16+3, 128, keys[2], wasym, kappa, sigma, orderbias, normkernel)
         self.fc2 = AsymLinear(128, 64, keys[3], wasym, kappa, sigma, orderbias, normkernel)
-        self.fc3 = AsymLinear(64, dim_out, keys[4], wasym, kappa, sigma, orderbias, normkernel)
+        self.fc3 = AsymLinear(64, dim_out, keys[4], wasym, kappa, sigma, orderbias, normkernel=False)
     
     def __call__(self, x, z, train=None):
         # Apply dimension expansion if desired
