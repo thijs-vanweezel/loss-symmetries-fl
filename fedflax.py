@@ -86,7 +86,7 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="earl
                 bar.set_description(f"Batch loss: {loss.mean():.4f}. Round {r} Epoch {epoch+1}/{local_epochs}")
             # Evaluate on local validation
             if local_epochs=="early":
-                val = reduce(lambda a,b: a+local_val_fn(models, *b).mean(), ds_val, 0.)
+                val = reduce(lambda a, batch: a+local_val_fn(models, batch[-1], *batch[:-1]).mean(), ds_val, 0.)
                 local_val_losses.append(val / len(ds_val))
                 # Check if local models are converged
                 if epoch>1 and val>=local_val_losses[-local_patience-1]:
@@ -101,7 +101,7 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="earl
         
         if rounds=="early":
             # Evaluate aggregated model
-            val = reduce(lambda a,b: a+val_fn(model_g, *b).mean(), ds_val, 0.)
+            val = reduce(lambda a, batch: a+val_fn(model_g, batch[-1], *batch[:-1]).mean(), ds_val, 0.)
             val /= len(ds_val)
             val_losses.append(val)       
             print(f"round {r} ({epoch} local epochs); global validation score: {val:.4f}")
