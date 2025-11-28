@@ -1,3 +1,6 @@
+import os
+os.environ["XLA_FLAGS"] = "--xla_gpu_strict_conv_algorithm_picker=false"
+os.environ["XLA_FLAGS"] += " --xla_gpu_deterministic_ops=true"
 import jax, numpy as np
 from functools import reduce
 from npy_append_array import NpyAppendArray
@@ -12,11 +15,11 @@ def save(models, filename, n, overwrite):
             f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(nnx.split(models, (nnx.Param, nnx.BatchStat), ...)[1])], axis=1))
 
 # Parallelized train step
-def return_train_step(ell):
+def return_train_step(ell, n_inputs):
     @nnx.jit
-    @nnx.vmap(in_axes=(0,None,0,0,0,0))
-    def train_step(model, model_g, opt, x_batch, z_batch, y_batch):
-        loss, grad = nnx.value_and_grad(ell)(model, model_g, x_batch, z_batch, y_batch)
+    @nnx.vmap(in_axes=(0,None,0,0)+(0,)*n_inputs)
+    def train_step(model, model_g, opt, y, *xs):
+        loss, grad = nnx.value_and_grad(ell)(model, model_g, y, *xs)
         opt.update(grad)
         return loss
     return train_step
@@ -47,8 +50,6 @@ def cast(model_g, n):
     return models
 
 def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="early", filename:str=None, n=4, max_patience:int=None, rounds:int|str="early", val_fn=None):
-    # Parallelize train step
-    train_step = return_train_step(ell)
     # Validation function that can be used as stand-alone
     # NOTE: For patience purposes, must be a Minimization metric
     local_val_fn = nnx.jit(nnx.vmap(
@@ -76,8 +77,12 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="earl
             # Collect and save params for visualization
             if filename: save(models, filename, n, overwrite=(r==0 and epoch==0))
             # Iterate over batches
-            for x_batch, z_batch, y_batch in (bar := tqdm(ds_train, leave=False)):
-                loss = train_step(models, model_g, opts, x_batch, z_batch, y_batch)
+            for batch, (*xs, y) in enumerate(bar := tqdm(ds_train, leave=False)):
+                # Create train step function if first iteration
+                if batch==0 and epoch==0 and r==0:
+                    train_step = return_train_step(ell, len(xs))
+                # Train step
+                loss = train_step(models, model_g, opts, y, *xs)
                 bar.set_description(f"Batch loss: {loss.mean():.4f}. Round {r} Epoch {epoch+1}/{local_epochs}")
             # Evaluate on local validation
             if local_epochs=="early":
