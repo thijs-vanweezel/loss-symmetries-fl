@@ -177,7 +177,7 @@ class ResNetBlock(nnx.Module):
         self.norm1 = nnx.BatchNorm(out_kernels, rngs=nnx.Rngs(keys[1]), param_dtype=jnp.float32, dtype=jnp.bfloat16)
         self.activation = activation
         self.conv2 = AsymConv(
-            in_kernels,
+            out_kernels,
             out_kernels,
             keys[2],
             wasym,
@@ -205,8 +205,8 @@ class ResNetBlock(nnx.Module):
         return x
 
 # Resnet for ImageNet ([3,4,6,3] for 34 layers, [2,2,2,2] for 18 layers)
-class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
-    def __init__(self, key:jax.dtypes.prng_key, layers:tuple[int,...]=[2,2,2,2], kernels:tuple[int,...]=[64,128,256,512], channels_in:int=1, dim_out:int=9, dimexp:bool=False, wasym:str|None=None, kappa:float=1., sigma:float=0., activation=nnx.relu, orderbias:bool=False, **kwargs):
+class ResNet(nnx.Module):
+    def __init__(self, key:jax.dtypes.prng_key, layers:tuple[int,...]=[2,2,2,2], kernels:tuple[int,...]=[64,128,256,512], channels_in:int=3, dim_out:int=1000, dimexp:bool=False, wasym:str|None=None, kappa:float=1., sigma:float=0., activation=nnx.relu, orderbias:bool=False, **kwargs):
         super().__init__(**kwargs)
         # Dimension expansion params
         self.dimexp = dimexp
@@ -222,9 +222,9 @@ class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
                 k_out = kernels[j]
                 s = 2 if i==0 and j>0 else 1
                 self.layers.append(ResNetBlock(keys[j+(i*j)], k_in, k_out, stride=s, wasym=wasym, kappa=kappa, sigma=sigma, activation=activation, orderbias=orderbias))
-        self.fc = AsymLinear(kernels[-1]+3, dim_out, keys[-1], wasym, kappa, sigma, orderbias, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
+        self.fc = AsymLinear(kernels[-1], dim_out, keys[-1], wasym, kappa, sigma, orderbias, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
 
-    def __call__(self, x, z, train=True):
+    def __call__(self, x, z=None, train=True):
         # Apply asymmetries (syre before wasym to avoid biasing the masks)
         x = x if not self.dimexp else interleave(x)
         # Forward pass
@@ -234,20 +234,21 @@ class ResNet(nnx.Module): # TODO: 36/(2**5) is a small shape for conv
         for layer in self.layers:
             x = layer(x, train=train)
         x = jnp.mean(x, axis=(1,2))
-        x = self.fc(jnp.concatenate([x, z], axis=-1))
+        x = self.fc(x)
         return x
 
 # LeNet-5 for 36X60 images + 3 auxiliary features
 class LeNet(nnx.Module):
-    def __init__(self, key:jax.dtypes.prng_key, dimexp=False, wasym=None, kappa=1., dim_out=2, sigma=0., activation=nnx.relu, orderbias=False):
+    def __init__(self, key:jax.dtypes.prng_key, dimexp=False, wasym=None, kappa=1., dim_out=2, sigma=0., activation=nnx.relu, orderbias=False, channels_in=1):
         super().__init__()
         # Dimension expansion params
         flat_shape = 15*27 if dimexp else 6*12
         self.dimexp = dimexp
+        # Misc params
         self.activation = activation
         # Layers
         keys = jax.random.split(key, 5)
-        self.conv1 = AsymConv(1, 8, keys[0], wasym, kappa, sigma, orderbias, kernel_size=(4,4), padding="VALID")
+        self.conv1 = AsymConv(channels_in, 8, keys[0], wasym, kappa, sigma, orderbias, kernel_size=(4,4), padding="VALID")
         self.conv2 = AsymConv(8, 16, keys[1], wasym, kappa, sigma, orderbias, kernel_size=(4,4), padding="VALID")
         self.fc1 = AsymLinear(flat_shape*16+3, 128, keys[2], wasym, kappa, sigma, orderbias)
         self.fc2 = AsymLinear(128, 64, keys[3], wasym, kappa, sigma, orderbias)
