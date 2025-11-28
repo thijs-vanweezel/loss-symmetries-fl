@@ -55,9 +55,6 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="earl
     local_val_fn = nnx.jit(nnx.vmap(
         val_fn or err_fn, in_axes=0
     ))
-    val_fn = nnx.jit(nnx.vmap(
-        val_fn or err_fn, in_axes=(None,0,0,0)
-    ))
 
     # Communication rounds
     val_losses = []
@@ -80,7 +77,7 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="earl
             for batch, (*xs, y) in enumerate(bar := tqdm(ds_train, leave=False)):
                 # Create train step function if first iteration
                 if batch==0 and epoch==0 and r==0:
-                    train_step = return_train_step(ell, len(xs))
+                    train_step = return_train_step(ell, n_inputs:=len(xs))
                 # Train step
                 loss = train_step(models, model_g, opts, y, *xs)
                 bar.set_description(f"Batch loss: {loss.mean():.4f}. Round {r} Epoch {epoch+1}/{local_epochs}")
@@ -100,10 +97,13 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="earl
         model_g = aggregate(model_g, updates)
         
         if rounds=="early":
+            # Initialize validation function
+            val_fn = nnx.jit(nnx.vmap(
+                val_fn or err_fn, in_axes=(None,0)+(0,)*n_inputs
+            ))
             # Evaluate aggregated model
             val = reduce(lambda a, batch: a+val_fn(model_g, batch[-1], *batch[:-1]).mean(), ds_val, 0.)
-            val /= len(ds_val)
-            val_losses.append(val)       
+            val_losses.append(val / len(ds_val))       
             print(f"round {r} ({epoch} local epochs); global validation score: {val:.4f}")
             # Check if model is converged
             if r>1 and val>=val_losses[-patience-1]:
