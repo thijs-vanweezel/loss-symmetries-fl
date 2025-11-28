@@ -36,7 +36,7 @@ def mask_linear_random(in_dim, out_dim, pfix, key, **kwargs):
 # And SyRe implementation consistent with https://github.com/xu-yz19/syre/blob/main/MLP.ipynb
 class AsymLinear(nnx.Linear):
     def __init__(self, in_features:int, out_features:int, key:jax.dtypes.prng_key, wasym:str|None=None, 
-                 kappa:float=1., sigma:float=0., orderbias:bool=False, **kwargs):
+                 kappa:float=1., sigma:float=0., orderbias:bool=False, normkernel:bool=False, **kwargs):
         keys = jax.random.split(key, 4)
         super().__init__(in_features, out_features, rngs=nnx.Rngs(keys[0]), use_bias=True, **kwargs)
         # Check if asymmetry is to be applied
@@ -44,7 +44,7 @@ class AsymLinear(nnx.Linear):
         self.wasym = bool(wasym)
         self.kappa = kappa
         self.orderbias = orderbias
-        # Create params
+        # Create W-Assymmetry and SyRe params
         if wasym=="densest": self.wmask = mask_linear_densest(*self.kernel.shape, dtype=self.param_dtype)
         elif wasym=="random": self.wmask = mask_linear_random(*self.kernel.shape, key=keys[1], pfix=1/3, dtype=self.param_dtype)
         if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
@@ -52,16 +52,16 @@ class AsymLinear(nnx.Linear):
 
     def __call__(self, inputs:jax.Array) -> jax.Array:
         kernel = self.kernel.value
-        # Order bias to counter permutation symmetry
-        if self.orderbias: bias = jnp.concatenate([
-            self.bias.value[0:1],
-            jnp.cumsum(jnp.exp(self.bias.value[1:])) + self.bias.value[0:1]
-        ])
-        else: bias = self.bias.value
+        bias = self.bias.value
         # Apply SyRe (before wasym to avoid biasing the masked weights)
         if self.ssigma>0.:
             bias = bias + self.randb * self.ssigma
             kernel = kernel + self.randk * self.ssigma
+        # Order bias to counter permutation symmetry
+        if self.orderbias: bias = jnp.concatenate([
+            bias[0:1],
+            jnp.cumsum(jnp.exp(bias[1:])) + bias[0:1]
+        ])
         # Apply w-asymmetry
         if self.wasym:
             kernel = kernel * self.wmask + (1-self.wmask) * self.randk * self.kappa
@@ -116,7 +116,7 @@ class AsymConv(nnx.Conv):
         self.wasym = bool(wasym)
         self.kappa = kappa
         self.orderbias = orderbias
-        # Create params
+        # Create W-Assymmetry and SyRe params
         if wasym=="densest": self.wmask = mask_conv_densest(*self.kernel.shape[1:], dtype=self.param_dtype)
         elif wasym=="random": self.wmask = mask_conv_random(*self.kernel.shape[1:], key=keys[1], pfix=1/3, dtype=self.param_dtype)
         if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
@@ -124,16 +124,16 @@ class AsymConv(nnx.Conv):
 
     def __call__(self, inputs:jax.Array) -> jax.Array:
         kernel = self.kernel.value
-        # Order bias to counter permutation symmetry
-        if self.orderbias: bias = jnp.concatenate([
-            self.bias.value[0:1],
-            jnp.cumsum(jnp.exp(self.bias.value[1:])) + self.bias.value[0:1]
-        ])
-        else: bias = self.bias.value
+        bias = self.bias.value
         # Apply SyRe (before wasym to avoid biasing the masked weights)
         if self.ssigma>0.:
             bias = bias + self.randb * self.ssigma
             kernel = kernel + self.randk * self.ssigma
+        # Order bias to counter permutation symmetry
+        if self.orderbias: bias = jnp.concatenate([
+            bias[0:1],
+            jnp.cumsum(jnp.exp(bias[1:])) + bias[0:1]
+        ])
         # Apply w-asymmetry
         if self.wasym:
             kernel = kernel * self.wmask + (1-self.wmask) * self.randk * self.kappa
