@@ -33,8 +33,8 @@ def mask_linear_random(in_dim, out_dim, pfix, key, **kwargs):
     return mask
 
 # W-Asymmetry implementation consistent with https://github.com/cptq/asymmetric-networks/blob/main/lmc/models/models_mlp.py#L169 
-# And SyRe implementation consistent with https://github.com/xu-yz19/syre/blob/main/MLP.ipynb
-# TODO: check normalization of kernel with https://github.com/o-laurent/bayes_posterior_symmetry_exploration/blob/main/symmetries/scale_resnet.py#L166
+# SyRe implementation consistent with https://github.com/xu-yz19/syre/blob/main/MLP.ipynb
+# And kernel normalization consistent with https://github.com/o-laurent/bayes_posterior_symmetry_exploration/blob/main/symmetries/scale_resnet.py#L166
 class AsymLinear(nnx.Linear):
     def __init__(self, in_features:int, out_features:int, key:jax.dtypes.prng_key, wasym:str|None=None, 
                  kappa:float=1., sigma:float=0., orderbias:bool=False, normkernel:bool=False, **kwargs):
@@ -113,6 +113,7 @@ def mask_conv_random(kernel_size, in_channels, out_channels, key, pfix:float, **
     return mask
 
 # W-Asymmetry implementation consistent with https://github.com/cptq/asymmetric-networks/blob/main/lmc/models/models_resnet.py#L22
+# And kernel normalization consistent with https://github.com/o-laurent/bayes_posterior_symmetry_exploration/blob/main/symmetries/scale_resnet.py#L166
 class AsymConv(nnx.Conv):
     def __init__(self, in_features:int, out_features:int, key:jax.dtypes.prng_key, wasym:str|None=None, 
                  kappa:float=1., sigma:float=0., orderbias:bool=False, normkernel:bool=False, **kwargs):
