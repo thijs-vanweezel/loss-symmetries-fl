@@ -97,9 +97,10 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="earl
             # Evaluate on local validation
             if not isinstance(local_epochs, int):
                 val = reduce(lambda a, batch: a+local_val_fn(models, batch[-1], *batch[:-1]).mean(), ds_val, 0.)
-                local_val_losses.append(val / len(ds_val))
+                val /= len(ds_val)
+                local_val_losses.append(val)
                 # Check if local models are converged
-                if epoch>1 and val>=local_val_losses[-local_patience-1]:
+                if epoch>=1 and val>=local_val_losses[-local_patience-1]:
                     local_patience += 1
                 else:
                     local_patience = 1
@@ -117,10 +118,11 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="earl
                 ))
             # Evaluate aggregated model
             val = reduce(lambda a, batch: a+val_fn(model_g, batch[-1], *batch[:-1]).mean(), ds_val, 0.)
-            val_losses.append(val / len(ds_val))       
+            val /= len(ds_val)
+            val_losses.append(val)       
             print(f"round {r} ({epoch} local epochs); global validation score: {val:.4f}")
             # Check if model is converged
-            if r>1 and val>=val_losses[-patience-1]:
+            if r>=1 and val>=val_losses[-patience-1]:
                 patience += 1
             else:
                 patience = 1
