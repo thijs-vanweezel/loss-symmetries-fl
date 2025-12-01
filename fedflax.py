@@ -142,4 +142,4 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="earl
     if filename: save(cast(model_g, n), filename, n, overwrite=False)
 
     # Return the final local models, i.e., before aggregation
-    return models
+    return models, r
