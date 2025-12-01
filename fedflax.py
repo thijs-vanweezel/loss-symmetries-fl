@@ -43,10 +43,10 @@ def aggregate(model_g, updates):
     return model_g
 
 # Broadcast global model to clients
-def cast(model_g, n):
-    params_g, struct = jax.tree.flatten(nnx.to_tree(model_g))
+def cast(module_g, n):
+    struct, params_g = nnx.split(module_g, ...)
     params_all = jax.tree.map(lambda x: jnp.repeat(jnp.expand_dims(x, 0), n, 0), params_g)
-    models = nnx.from_tree(jax.tree.unflatten(struct, params_all))
+    models = nnx.merge(struct, params_all)
     return models
 
 def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="early", filename:str=None, n=4, max_patience:int=None, rounds:int|str="early", val_fn=None):
