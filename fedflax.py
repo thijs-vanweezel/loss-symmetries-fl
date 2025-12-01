@@ -63,6 +63,16 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="earl
         max_patience: Maximum patience for early stopping (if local_epochs or rounds is "early")
         rounds: Number of communication rounds, or "early" for early stopping based on validation loss
         val_fn: Validation function, necessarily a minimization metric, with signature ( model, y, *xs ) -> loss
+    Returns:
+        The final local models before aggregation. To aggregate;
+        ```
+        from fedflax import train, get_updates, aggregate
+        model_init = ... # initialize global model
+        models = train(model_init, ...) # train with desired arguments
+        updates = get_updates(model_init, models)
+        model_g = aggregate(model_init, updates)
+        # Alternatively, take an average using `jax.tree.map` directly on the State of `models`
+        ```
     """
     # Validation function that can be used as stand-alone
     local_val_fn = nnx.jit(nnx.vmap(
@@ -131,5 +141,5 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="earl
     # Save final params
     if filename: save(cast(model_g, n), filename, n, overwrite=False)
 
-    # Returns for the various analyses
-    return updates, models
+    # Return the final local models, i.e., before aggregation
+    return models
