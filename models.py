@@ -32,7 +32,7 @@ def mask_linear_random(in_dim, out_dim, pfix, key, **kwargs):
         mask = mask.at[zeros_in_row, row_idx].set(0)
     return mask
 
-# W-Asymmetry implementation consistent with https://github.com/cptq/asymmetric-networks/blob/main/lmc/models/models_mlp.py#L169 
+# W-Asymmetry implementation consistent with https://github.com/cptq/asymmetric-networks/blob/main/lmc/models/models_mlp.py#L169 # TODO: is it strange that updates for masked weights are not zero?
 # SyRe implementation consistent with https://github.com/xu-yz19/syre/blob/main/MLP.ipynb
 # And kernel normalization consistent with https://github.com/o-laurent/bayes_posterior_symmetry_exploration/blob/main/symmetries/scale_resnet.py#L166
 class AsymLinear(nnx.Linear):
