@@ -80,9 +80,10 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="earl
                     train_step = return_train_step(ell, n_inputs:=len(xs))
                 # Train step
                 loss = train_step(models, model_g, opts, y, *xs)
-                bar.set_description(f"Batch loss: {loss.mean():.4f}. Round {r} Epoch {epoch+1}/{local_epochs}")
+                # Inform user
+                bar.set_description(f"Round {r}/{rounds}, epoch {epoch}/{local_epochs} (local validation score: {'N/A' if epoch==0 or isinstance(local_epochs, int) else val}, local batch loss: {loss.mean():.4f})")
             # Evaluate on local validation
-            if local_epochs=="early":
+            if not isinstance(local_epochs, int):
                 val = reduce(lambda a, batch: a+local_val_fn(models, batch[-1], *batch[:-1]).mean(), ds_val, 0.)
                 local_val_losses.append(val / len(ds_val))
                 # Check if local models are converged
