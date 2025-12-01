@@ -99,9 +99,10 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="earl
         
         if rounds=="early":
             # Initialize validation function
-            val_fn = nnx.jit(nnx.vmap(
-                val_fn or err_fn, in_axes=(None,0)+(0,)*n_inputs
-            ))
+            if r==0:
+                val_fn = nnx.jit(nnx.vmap(
+                    val_fn or err_fn, in_axes=(None,0)+(0,)*n_inputs
+                ))
             # Evaluate aggregated model
             val = reduce(lambda a, batch: a+val_fn(model_g, batch[-1], *batch[:-1]).mean(), ds_val, 0.)
             val_losses.append(val / len(ds_val))       
