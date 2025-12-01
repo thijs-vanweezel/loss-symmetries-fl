@@ -77,8 +77,7 @@ def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="earl
     while (r!=rounds) if isinstance(rounds, int) else (patience<=max_patience):
         # Parallelize global model and optimizers
         models = cast(model_g, n)
-        if r==0:
-            opts = nnx.vmap(opt_create)(models)
+        opts = nnx.vmap(opt_create)(models)
         
         # Local training
         local_val_losses = []
