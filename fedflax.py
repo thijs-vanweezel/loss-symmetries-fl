@@ -50,8 +50,22 @@ def cast(model_g, n):
     return models
 
 def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="early", filename:str=None, n=4, max_patience:int=None, rounds:int|str="early", val_fn=None):
+    """
+    Federated training loop. 
+    Args:
+        model_g: Initialized global model
+        opt_create: Function that creates optimizer when given a model
+        ds_train: Training dataset (iterable with signature ( *xs, y ))
+        ds_val: Validation dataset (iterable with signature ( *xs, y ))
+        ell: Loss function with signature ( model, model_g, y, *xs ) -> loss
+        local_epochs: Number of local epochs per communication round, or "early" for early stopping based on validation loss
+        filename: If provided, saves model parameters to this file at each epoch
+        n: Number of clients
+        max_patience: Maximum patience for early stopping (if local_epochs or rounds is "early")
+        rounds: Number of communication rounds, or "early" for early stopping based on validation loss
+        val_fn: Validation function, necessarily a minimization metric, with signature ( model, y, *xs ) -> loss
+    """
     # Validation function that can be used as stand-alone
-    # NOTE: For patience purposes, must be a Minimization metric
     local_val_fn = nnx.jit(nnx.vmap(
         val_fn or err_fn, in_axes=0
     ))
