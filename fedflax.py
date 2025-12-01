@@ -48,7 +48,7 @@ def cast(module_g, n):
     models = nnx.merge(struct, params_all)
     return models
 
-def train(model_g, opt_create, ds_train, ds_val, ell, local_epochs:int|str="early", filename:str=None, n=4, max_patience:int=None, rounds:int|str="early", val_fn=None):
+def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str="early", filename:str=None, n=4, max_patience:int=None, rounds:int|str="early", val_fn=None):
     """
     Federated training loop. 
     Args:
