@@ -40,3 +40,5 @@ def return_ce(omega):
 
 # Inverse accuracy function for classification validation
 err_fn = lambda m,y,*xs: 1-(m(*xs,train=False).argmax(-1)==y.argmax(-1)).mean()
+
+top_5_err = lambda m,y,*xs: 1 - jnp.any(jnp.isin(y.argmax(-1, keepdims=True), jnp.argsort(m(*xs,train=False), axis=-1)[:,-5:]), axis=-1).mean()
