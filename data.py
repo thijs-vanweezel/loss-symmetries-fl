@@ -56,7 +56,7 @@ class MPIIGaze(Dataset):
             label[1] = -label[1]
         # Label to pitch and yaw
         label = torch.asarray([torch.arcsin(-label[1]), torch.arctan2(-label[0], -label[2])]) # polar coordinates
-        if not self.discrete: return img, aux, label
+        if not self.discrete: return label, img, aux
         # Process label into one of 16 regions
         nr = 3
         min_0, max_0, min_1, max_1 = -0.36719793, 0.3623084, -0.31378174, 0.38604215 # mins and maxs taken from training set
