@@ -54,9 +54,9 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
     Args:
         model_g: Initialized global model
         opt_create: Function that creates optimizer when given a model
-        ds_train: Training dataset (iterable with signature ( *xs, y ))
-        ds_val: Validation dataset (iterable with signature ( *xs, y ))
+        ds_train: Iterable training dataset with signature ( *xs, y ), of which both arguments have shape ( n_clients, batch_size, ... )
         ell: Loss function with signature ( model, model_g, y, *xs ) -> loss
+        ds_val: Optional iterable validation dataset with signature ( *xs, y ), of which both arguments have shape ( n_clients, batch_size, ... )
         local_epochs: Number of local epochs per communication round, or "early" for early stopping based on validation loss
         filename: If provided, saves model parameters to this file at each epoch
         n: Number of clients
