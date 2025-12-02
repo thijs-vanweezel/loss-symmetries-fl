@@ -67,7 +67,7 @@ class MPIIGaze(Dataset):
         ]) 
         label = torch.abs(label - regions).sum(axis=1).argmin() # nearest region
         label = torch.eye(nr*nr)[label] # one-hot encode
-        return img, aux, label
+        return label, img, aux
 
 class ImageNet(Dataset):
     def __init__(self, path:str="./imagenet/Data/CLS-LOC/val/", n_clients:int=4):
@@ -97,7 +97,7 @@ class ImageNet(Dataset):
         img = img.swapaxes(0,2)
         # One-hot encode labels
         label = torch.eye(1000)[label]
-        return img, label
+        return label, img
 
 def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
@@ -108,9 +108,11 @@ def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.nda
     """
     # Collect, convert, and concat
     aux = not len(batch[0])==2
-    if aux: imgs, auxs, labels = zip(*batch)
-    else: imgs, labels = zip(*batch)
-    if aux: auxs = jnp.stack([jnp.asarray(aux, dtype=jnp.float32) for aux in auxs])
+    if aux: 
+        labels, imgs, auxs = zip(*batch)
+        auxs = jnp.stack([jnp.asarray(aux, dtype=jnp.float32) for aux in auxs])
+    else: 
+        labels, imgs = zip(*batch)
     imgs = jnp.stack([jnp.asarray(img, dtype=jnp.float32) for img in imgs])
     labels = jnp.stack([jnp.asarray(label, dtype=jnp.float32) for label in labels])
 
@@ -145,8 +147,8 @@ def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.nda
         clients_imgs = [imgs[jnp.asarray(idxs + shared_idxs)] for idxs in indiv_idxs]
         clients_labels = [labels[jnp.asarray(idxs + shared_idxs)] for idxs in indiv_idxs]
 
-    if aux: return jnp.stack(clients_imgs, 0), jnp.stack(clients_auxs, 0), jnp.stack(clients_labels, 0)
-    return jnp.stack(clients_imgs, 0), jnp.stack(clients_labels, 0)
+    if aux: return jnp.stack(clients_labels, 0), jnp.stack(clients_imgs, 0), jnp.stack(clients_auxs, 0)
+    return jnp.stack(clients_labels, 0), jnp.stack(clients_imgs, 0)
 
 def get_data(skew:str="feature", batch_size=128, n_clients=4, beta:float=0, path="MPIIGaze_preprocessed", partition="train", discrete:bool|None=False, **kwargs)->DataLoader:
     assert beta>=0 and beta<=1, "Beta must be between 0 and 1"

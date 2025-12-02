@@ -54,9 +54,9 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
     Args:
         model_g: Initialized global model
         opt_create: Function that creates optimizer when given a model
-        ds_train: Iterable training dataset with signature ( *xs, y ), of which both arguments have shape ( n_clients, batch_size, ... )
+        ds_train: Iterable training dataset with signature ( y, *xs ), of which both arguments have shape ( n_clients, batch_size, ... )
         ell: Loss function with signature ( model, model_g, y, *xs ) -> loss
-        ds_val: Optional iterable validation dataset with signature ( *xs, y ), of which both arguments have shape ( n_clients, batch_size, ... )
+        ds_val: Optional iterable validation dataset with signature ( y, *xs ), of which both arguments have shape ( n_clients, batch_size, ... )
         local_epochs: Number of local epochs per communication round, or "early" for early stopping based on validation loss
         filename: If provided, saves model parameters to this file at each epoch
         n: Number of clients
@@ -96,7 +96,7 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
             # Collect and save params for visualization
             if filename: save(models, filename, n, overwrite=(r==0 and epoch==0))
             # Iterate over batches
-            for batch, (*xs, y) in enumerate(bar := tqdm(ds_train, leave=False)):
+            for batch, (y, *xs) in enumerate(bar := tqdm(ds_train, leave=False)):
                 # Create train step function if first iteration
                 if batch==0 and epoch==0 and r==0:
                     train_step = return_train_step(ell, n_inputs:=len(xs))
@@ -106,7 +106,7 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
                 bar.set_description(f"Round {r}/{rounds}, epoch {epoch}/{local_epochs} (local validation score: {'N/A' if epoch==0 or isinstance(local_epochs, int) else val}, local batch loss: {loss.mean():.4f})")
             # Evaluate on local validation
             if not isinstance(local_epochs, int):
-                val = reduce(lambda a, batch: a+local_val_fn(models, batch[-1], *batch[:-1]).mean(), ds_val, 0.)
+                val = reduce(lambda a, batch: a+local_val_fn(models, *batch).mean(), ds_val, 0.)
                 val /= len(ds_val)
                 local_val_losses.append(val)
                 # Check if local models are converged
@@ -127,7 +127,7 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
                     val_fn or err_fn, in_axes=(None,0)+(0,)*n_inputs
                 ))
             # Evaluate aggregated model
-            val = reduce(lambda a, batch: a+val_fn(model_g, batch[-1], *batch[:-1]).mean(), ds_val, 0.)
+            val = reduce(lambda a, batch: a+val_fn(model_g, *batch).mean(), ds_val, 0.)
             val /= len(ds_val)
             val_losses.append(val)       
             print(f"round {r} ({epoch} local epochs); global validation score: {val:.4f}")
