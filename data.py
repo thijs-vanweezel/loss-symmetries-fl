@@ -70,7 +70,7 @@ class MPIIGaze(Dataset):
         return label, img, aux
 
 class ImageNet(Dataset):
-    def __init__(self, path:str="./imagenet/Data/CLS-LOC/val/", n_clients:int=4):
+    def __init__(self, path:str="./imagenet/Data/CLS-LOC/train/", n_clients:int=4):
         # Evenly divide all labels among clients
         g = os.walk(path)
         classes = next(g)[1]
@@ -84,6 +84,7 @@ class ImageNet(Dataset):
         self.n_clients = n_clients
 
     def __len__(self):
+        # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
         return min([len(files) for files in self.data.values()])*self.n_clients
     
     def __getitem__(self, idx):
@@ -93,7 +94,8 @@ class ImageNet(Dataset):
         label, dirname, filename = self.data[c][i]
         # Load image
         img = torchvision.io.decode_image(os.path.join(dirname, filename), mode="RGB").float() / 255.
-        img = torchvision.transforms.Resize((128,128))(img)
+        img = torchvision.transforms.Resize(256)(img)
+        img = torchvision.transforms.CenterCrop(224)(img)
         img = img.swapaxes(0,2)
         # One-hot encode labels
         label = torch.eye(1000)[label]
