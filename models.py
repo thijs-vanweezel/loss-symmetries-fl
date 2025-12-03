@@ -177,6 +177,8 @@ class ResNetBlock(nnx.Module):
         super().__init__()
         keys = jax.random.split(key, 5)
         self.stride = stride
+        self.activation = activation
+        self.norm1 = nnx.BatchNorm(in_kernels, rngs=nnx.Rngs(keys[1]), param_dtype=jnp.float32, dtype=jnp.bfloat16)
         self.conv1 = AsymConv(
             in_kernels, 
             out_kernels,
@@ -192,8 +194,7 @@ class ResNetBlock(nnx.Module):
             param_dtype=jnp.bfloat16,
             dtype=jnp.bfloat16
         )
-        self.norm1 = nnx.BatchNorm(out_kernels, rngs=nnx.Rngs(keys[1]), param_dtype=jnp.float32, dtype=jnp.bfloat16)
-        self.activation = activation
+        self.norm2 = nnx.BatchNorm(out_kernels, rngs=nnx.Rngs(keys[3]), param_dtype=jnp.float32, dtype=jnp.bfloat16)
         self.conv2 = AsymConv(
             out_kernels,
             out_kernels,
@@ -208,7 +209,6 @@ class ResNetBlock(nnx.Module):
             param_dtype=jnp.bfloat16,
             dtype=jnp.bfloat16
         )
-        self.norm2 = nnx.BatchNorm(out_kernels, rngs=nnx.Rngs(keys[3]), param_dtype=jnp.float32, dtype=jnp.bfloat16)
         if stride>1 and in_kernels!=out_kernels:
             self.id_conv = AsymConv(
                 in_kernels, 
@@ -227,11 +227,13 @@ class ResNetBlock(nnx.Module):
 
     def __call__(self, x, train=True):
         res = x if self.stride==1 else self.id_conv(x)
-        x = self.conv1(x)
+        # Pre-activation implementation
         x = self.norm1(x, use_running_average=not train)
         x = self.activation(x)
-        x = self.conv2(x)
+        x = self.conv1(x)
         x = self.norm2(x, use_running_average=not train)
+        x = self.activation(x)
+        x = self.conv2(x)
         x = res+x
         return x
 
@@ -244,9 +246,9 @@ class ResNet(nnx.Module):
         super().__init__(**kwargs)
         self.dimexp = dimexp
         # Keys
-        keys = jax.random.split(key, sum(layers)+2)
+        keys = iter(jax.random.split(key, sum(layers)+2))
         # Layers
-        self.conv = AsymConv(channels_in, 64, keys[0], wasym, kappa, sigma, orderbias, normweights, kernel_size=(7,7),
+        self.conv = AsymConv(channels_in, 64, next(keys), wasym, kappa, sigma, orderbias, normweights, kernel_size=(7,7),
                              strides=(2,2), padding="SAME", param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
         self.activation = activation
         self.layers = []
@@ -255,9 +257,9 @@ class ResNet(nnx.Module):
                 k_in = ([64]+kernels)[j] if i==0 else kernels[j]
                 k_out = kernels[j]
                 s = 2 if i==0 and j>0 else 1
-                self.layers.append(ResNetBlock(keys[j+(i*j)], k_in, k_out, stride=s, wasym=wasym, kappa=kappa, sigma=sigma, 
+                self.layers.append(ResNetBlock(next(keys), k_in, k_out, stride=s, wasym=wasym, kappa=kappa, sigma=sigma, 
                                                activation=activation, orderbias=orderbias, normweights=normweights))
-        self.fc = AsymLinear(kernels[-1], dim_out, keys[-1], wasym, kappa, sigma, orderbias, normweights=False, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
+        self.fc = AsymLinear(kernels[-1], dim_out, next(keys), wasym, kappa, sigma, orderbias, normweights=False, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
 
     def __call__(self, x, z=None, train=True):
         # Apply dimension expansion if desired
