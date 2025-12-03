@@ -31,7 +31,7 @@ def get_updates(model_g, models):
     return jax.tree.map(lambda pg, p: p-pg, params_g, params) # state of length n_layers with arrays of shape (n_clients, *layer_shape)
 
 def aggregate(model_g, updates):
-    # Get model structure
+    # Get global model's structure, along with its parameters/rest (which have no client dimension)
     struct, params_g, rest = nnx.split(model_g, (nnx.Param, nnx.BatchStat), ...)
     # Average updates
     update = jax.tree.map(lambda x: jnp.mean(x, axis=0), updates)
@@ -71,7 +71,6 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
         models = train(model_init, ...) # train with desired arguments
         updates = get_updates(model_init, models)
         model_g = aggregate(model_init, updates)
-        # Alternatively, take an average using `jax.tree.map` directly on the State of `models`
         ```
     """
     # Validation function that can be used as stand-alone
