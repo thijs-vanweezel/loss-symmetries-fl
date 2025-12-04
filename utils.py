@@ -1,6 +1,7 @@
 import jax, optax
 from jax import numpy as jnp
 from flax import nnx
+from functools import reduce
 
 # Optimizer
 opt_create = lambda model, learning_rate, **kwargs: nnx.Optimizer(
@@ -40,5 +41,13 @@ def return_ce(omega):
 
 # Inverse accuracy function for classification validation
 err_fn = lambda m,y,*xs: 1-(m(*xs,train=False).argmax(-1)==y.argmax(-1)).mean()
-
 top_5_err = lambda m,y,*xs: 1 - jnp.any(y.argmax(-1, keepdims=True) == jnp.argsort(m(*xs,train=False), axis=-1)[:,-5:], axis=-1).mean()
+
+# Client drift in function space, by comparing logits to avg logits
+def functional_drift(models, ds_test):
+    vcall = nnx.vmap(lambda model, *batch: model(*batch, train=False))
+    logits = reduce(lambda acc, batch: acc + [vcall(models, *batch[1:])], ds_test, [])
+    logits = jnp.concatenate(logits, axis=1)
+    logits_mean = logits.mean(0)
+    drift = jnp.abs(logits - logits_mean).mean((1,2))
+    return drift
