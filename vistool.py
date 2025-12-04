@@ -77,6 +77,7 @@ def plot_trajectory(errs, model_idx, epochs, reduced_params, alpha_grid, beta_gr
         ax.plot(reduced_params[idx,0], reduced_params[idx,1], c=f"C{i.item()+1}", label=f"Client {i.item()}", lw=1)
         # Color uniformly at aggregation points
         colors = [f"C{c.item()}" for c in jnp.array([i+1]*len(idx))*(1-jnp.maximum(1-jnp.arange(len(idx))%epochs, 0))]
+        colors = [c if c!="C0" else "red" for c in colors]
         # Circle initial model
         linewidths = [2.]+[0.]*(len(idx)-1)
         sizes = [30.]+[10.]*(len(idx)-1)
