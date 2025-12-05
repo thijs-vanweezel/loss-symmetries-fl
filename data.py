@@ -1,5 +1,5 @@
 from scipy.io import loadmat
-import os, torch, shutil, torchvision
+import os, torch, shutil, torchvision, optax
 from torch.utils.data import Dataset, DataLoader, default_collate
 from jax import numpy as jnp
 from functools import partial
@@ -137,11 +137,12 @@ def jax_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.nda
     # Label skew, by evenly dividing the samples into n directional groups, and then sharing a portion of the total samples
     # Assumes there is no order to the labels' values
     elif skew=="label":
-        # Sort the non-shared samples by label value
+        # Rank the non-shared samples by quadrant angle
         indiv_stop = int(indiv_frac*len(imgs)*n_clients)
-        sorted_idxs = jnp.argsort(labels[:indiv_stop].argmax(axis=1))
+        angles = (jnp.arctan2(*labels.T) + 2*jnp.pi) % (2*jnp.pi)
+        sorted_idxs = jnp.argsort(angles[:indiv_stop])
         # Divide into n_clients groups
-        group_size = len(sorted_idxs)//n_clients
+        group_size = indiv_stop//n_clients
         indiv_idxs = [list(sorted_idxs[i*group_size:(i+1)*group_size]) for i in range(n_clients)]
         shared_idxs = list(range(indiv_stop, len(imgs)))
         # Select
