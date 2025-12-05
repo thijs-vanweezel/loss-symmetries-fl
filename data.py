@@ -59,21 +59,26 @@ class MPIIGaze(Dataset):
 
 class ImageNet(Dataset):
     def __init__(self, path:str="./imagenet/Data/CLS-LOC/train/", n_clients:int=4, n_classes:int=1000):
-        # Evenly divide all labels among clients
         g = os.walk(path)
+        # Get class names and limit to n_classes by skipping
         classes = next(g)[1]
         classes = classes[::len(classes)//n_classes]
+        # Dedicate a client to each class
         k, m = divmod(len(classes), n_clients)
         class_splits = {classes[idx]: client for client in range(n_clients) for idx in range(client*k+min(client,m), (client+1)*k+min(client+1,m))}
+        # Assign sample paths to each client
         self.data = {c: [] for c in range(n_clients)}
         label_idx = 0
         for dirname, _, filelist in g:
             classname = os.path.basename(dirname)
+            # Only n_classes
             if classname in classes:
+                # Assign to client
                 client = class_splits[classname]
                 filelist = [(label_idx, os.path.join(dirname, filename)) for filename in filelist]
                 self.data[client].extend(filelist)
                 label_idx += 1
+        # Misc attributes
         self.n_clients = n_clients
         self.n_classes = n_classes
 
