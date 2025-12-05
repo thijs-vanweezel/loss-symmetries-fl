@@ -58,18 +58,24 @@ class MPIIGaze(Dataset):
         return label, img, aux
 
 class ImageNet(Dataset):
-    def __init__(self, path:str="./imagenet/Data/CLS-LOC/train/", n_clients:int=4):
+    def __init__(self, path:str="./imagenet/Data/CLS-LOC/train/", n_clients:int=4, n_classes:int=1000):
         # Evenly divide all labels among clients
         g = os.walk(path)
         classes = next(g)[1]
+        classes = classes[::len(classes)//n_classes]
         k, m = divmod(len(classes), n_clients)
-        class_splits = {classes[idx]: c for c in range(n_clients) for idx in range(c*k+min(c,m), (c+1)*k+min(c+1,m))}
+        class_splits = {classes[idx]: client for client in range(n_clients) for idx in range(client*k+min(client,m), (client+1)*k+min(client+1,m))}
         self.data = {c: [] for c in range(n_clients)}
-        for label, (dirname, _, filelist) in enumerate(g):
-            client = class_splits[os.path.basename(dirname)]
-            filelist = [(label, dirname, f) for f in filelist]
-            self.data[client].extend(filelist)
+        label_idx = 0
+        for dirname, _, filelist in g:
+            classname = os.path.basename(dirname)
+            if classname in classes:
+                client = class_splits[classname]
+                filelist = [(label_idx, os.path.join(dirname, filename)) for filename in filelist]
+                self.data[client].extend(filelist)
+                label_idx += 1
         self.n_clients = n_clients
+        self.n_classes = n_classes
 
     def __len__(self):
         # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
@@ -79,14 +85,14 @@ class ImageNet(Dataset):
         # Load datum
         c = idx % self.n_clients
         i = idx // self.n_clients
-        label, dirname, filename = self.data[c][i]
+        label, filepath = self.data[c][i]
         # Load image
-        img = torchvision.io.decode_image(os.path.join(dirname, filename), mode="RGB").float() / 255.
+        img = torchvision.io.decode_image(filepath, mode="RGB").float() / 255.
         img = torchvision.transforms.Resize(256)(img)
         img = torchvision.transforms.CenterCrop(224)(img)
         img = img.swapaxes(0,2)
         # One-hot encode labels
-        label = torch.eye(1000)[label]
+        label = torch.eye(self.n_classes)[label]
         return label, img
 
 def gaze_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
@@ -163,7 +169,7 @@ def imagenet_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jn
 
     return jnp.stack(clients_labels, 0), jnp.stack(clients_imgs, 0)
 
-def get_data(skew:str="feature", batch_size=128, n_clients=4, beta:float=0, dataset=0, partition="train", **kwargs)->DataLoader:
+def get_data(skew:str="feature", batch_size=128, n_clients=4, beta:float=0, dataset=0, partition="train", n_classes=1000, **kwargs)->DataLoader:
     assert beta>=0 and beta<=1, "Beta must be between 0 and 1"
     beta = 1-beta if skew=="overlap" else beta
     # Fractions derived
@@ -177,7 +183,7 @@ def get_data(skew:str="feature", batch_size=128, n_clients=4, beta:float=0, data
         assert skew in ["feature", "overlap", "label"], "Skew must be one of 'feature', 'overlap', or 'label'. For no skew, specify beta=0."
         collate = partial(gaze_collate, n_clients=n_clients, indiv_frac=indiv_frac, skew=skew)
     else:
-        dataset = ImageNet(path=os.path.join("imagenet/Data/CLS-LOC", partition), n_clients=n_clients)
+        dataset = ImageNet(path=os.path.join("imagenet/Data/CLS-LOC", partition), n_clients=n_clients, n_classes=n_classes)
         assert skew in ["overlap", "label"], "Skew must be either 'overlap' or 'label'. For no skew, specify beta=0."
         collate = partial(imagenet_collate, n_clients=n_clients, indiv_frac=indiv_frac, skew=skew)
     # Iterable batches
