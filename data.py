@@ -78,6 +78,9 @@ class ImageNet(Dataset):
                 filelist = [(label_idx, os.path.join(dirname, filename)) for filename in filelist]
                 self.data[client].extend(filelist)
                 label_idx += 1
+        # Shuffle so that samples are not ordered by class (note: deterministic)
+        for c in range(n_clients):
+            self.data[c].sort(key=lambda x: hash(x[1]))
         # Misc attributes
         self.n_clients = n_clients
         self.n_classes = n_classes
