@@ -1,5 +1,5 @@
 from scipy.io import loadmat
-import os, torch, shutil, torchvision, optax
+import os, torch, shutil, torchvision, optax, hashlib
 from torch.utils.data import Dataset, DataLoader, default_collate
 from jax import numpy as jnp
 from functools import partial
@@ -80,7 +80,7 @@ class ImageNet(Dataset):
                 label_idx += 1
         # Shuffle so that samples are not ordered by class (note: deterministic)
         for c in range(n_clients):
-            self.data[c].sort(key=lambda x: hash(x[1]))
+            self.data[c].sort(key=lambda x: hashlib.sha256(str(x).encode()).hexdigest())
         # Misc attributes
         self.n_clients = n_clients
         self.n_classes = n_classes
