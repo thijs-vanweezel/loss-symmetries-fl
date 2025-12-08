@@ -24,9 +24,9 @@ def mask_linear_densest(in_dim, out_dim, **kwargs):
             row_idx += 1
             if row_idx >= out_dim:
                 return mask
-def mask_linear_random(in_dim, out_dim, pfix, key, **kwargs):
+def mask_linear_random(in_dim, out_dim, exp, key, **kwargs):
     mask = jnp.ones((in_dim, out_dim), **kwargs)
-    nfix = max(1, int(in_dim**(1/4))) #int(pfix*in_dim)
+    nfix = max(1, int(in_dim**exp))
     for row_idx, key in zip(range(out_dim), jax.random.split(key, out_dim)):
         zeros_in_row = jax.random.permutation(key, jnp.arange(in_dim))[:nfix]
         mask = mask.at[zeros_in_row, row_idx].set(0)
@@ -48,7 +48,7 @@ class AsymLinear(nnx.Linear):
         self.normweights = normweights
         # Create W-Assymmetry and SyRe params
         if wasym=="densest": self.wmask = mask_linear_densest(*self.kernel.shape, dtype=self.param_dtype)
-        elif wasym=="random": self.wmask = mask_linear_random(*self.kernel.shape, key=keys[1], pfix=1/3, dtype=self.param_dtype)
+        elif wasym=="random": self.wmask = mask_linear_random(*self.kernel.shape, key=keys[1], exp=1/3, dtype=self.param_dtype)
         if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
         if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
 
@@ -101,10 +101,10 @@ def mask_conv_densest(kernel_size, in_channels, out_channels, **kwargs):
                 return mask
             mask = mask.at[tuple(cols_idx) + (out_channel_idx,)].set(0)
             out_channel_idx += 1
-def mask_conv_random(kernel_size, in_channels, out_channels, key, pfix:float, **kwargs):
+def mask_conv_random(kernel_size, in_channels, out_channels, key, exp:float, **kwargs):
     mask = jnp.ones((kernel_size, kernel_size, in_channels, out_channels), **kwargs)
     weights_per_out_channel = in_channels * kernel_size**2
-    nfix = max(1, int(weights_per_out_channel**(1/4))) #int(pfix*weights_per_out_channel)
+    nfix = max(1, int(weights_per_out_channel**exp)) 
     flat_idx_to_3d_idx = jax.vmap(lambda idx : [idx%kernel_size, (idx//kernel_size)%kernel_size, idx//kernel_size**2])
     for out_channel_idx, key in zip(range(out_channels), jax.random.split(key, out_channels)):
         flat_col_idxs = jax.random.permutation(key, jnp.arange(weights_per_out_channel))[:nfix]
@@ -127,7 +127,7 @@ class AsymConv(nnx.Conv):
         self.normweights = normweights
         # Create W-Assymmetry and SyRe params
         if wasym=="densest": self.wmask = mask_conv_densest(*self.kernel.shape[1:], dtype=self.param_dtype)
-        elif wasym=="random": self.wmask = mask_conv_random(*self.kernel.shape[1:], key=keys[1], pfix=1/3, dtype=self.param_dtype)
+        elif wasym=="random": self.wmask = mask_conv_random(*self.kernel.shape[1:], key=keys[1], exp=1/3, dtype=self.param_dtype)
         if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
         if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
 
