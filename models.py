@@ -59,12 +59,11 @@ class AsymLinear(nnx.Linear):
             self.coeffs = nnx.Param(jnp.zeros(d_int, dtype=self.param_dtype))
 
     def __call__(self, inputs:jax.Array) -> jax.Array:
-        # Get kernel from intrinsic dimensionality
+        bias = self.bias
+        kernel = self.kernel
+        # Get kernel from intrinsic dimensionality (before everything to recover kernel shape)
         if self.d_int:
-            kernel = self.kernel + jnp.tensordot(self.coeffs.value, self.bigp, axes=1)
-        else:
-            kernel = self.kernel.value
-        bias = self.bias.value
+            kernel = kernel + jnp.tensordot(self.coeffs.value, self.bigp, axes=1)
         # Apply SyRe (before wasym to avoid biasing the masked weights)
         if self.ssigma>0.:
             bias = bias + self.randb * self.ssigma
@@ -148,12 +147,11 @@ class AsymConv(nnx.Conv):
             self.coeffs = nnx.Param(jnp.zeros(d_int, dtype=self.param_dtype))
 
     def __call__(self, inputs:jax.Array) -> jax.Array:
-        # Get kernel from intrinsic dimensionality
+        bias = self.bias
+        kernel = self.kernel
+        # Get kernel from intrinsic dimensionality (before everything to recover kernel shape)
         if self.d_int:
-            kernel = self.kernel + jnp.tensordot(self.coeffs.value, self.bigp, axes=1)
-        else:
-            kernel = self.kernel.value
-        bias = self.bias.value
+            kernel = kernel + jnp.tensordot(self.coeffs.value, self.bigp, axes=1)
         # Apply SyRe (before wasym to avoid biasing the masked weights)
         if self.ssigma>0.:
             bias = bias + self.randb * self.ssigma
