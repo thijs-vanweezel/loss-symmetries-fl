@@ -54,7 +54,7 @@ class AsymLinear(nnx.Linear):
         if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
         if d_int: 
             self.bigp = jax.random.normal(keys[-1], shape=(d_int, *self.kernel.shape), dtype=self.param_dtype)
-            self.bigp = self.bigp / jnp.linalg.norm(self.bigp.reshape(d_int, -1), axis=1)[:, None, None, None, None]
+            self.bigp = self.bigp / jnp.linalg.norm(self.bigp.reshape(d_int, -1), axis=1)[:, None, None]
             self.kernel = self.kernel.value
             self.parameters = nnx.Param(jnp.zeros(d_int, dtype=self.param_dtype))
 
