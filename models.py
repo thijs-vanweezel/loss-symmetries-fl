@@ -56,12 +56,12 @@ class AsymLinear(nnx.Linear):
             self.bigp = jax.random.normal(keys[-1], shape=(d_int, *self.kernel.shape), dtype=self.param_dtype)
             self.bigp = self.bigp / jnp.linalg.norm(self.bigp.reshape(d_int, -1), axis=1)[:, None, None]
             self.kernel = self.kernel.value
-            self.parameters = nnx.Param(jnp.zeros(d_int, dtype=self.param_dtype))
+            self.coeffs = nnx.Param(jnp.zeros(d_int, dtype=self.param_dtype))
 
     def __call__(self, inputs:jax.Array) -> jax.Array:
         # Get kernel from intrinsic dimensionality
         if self.d_int:
-            kernel = self.kernel + jnp.tensordot(self.parameters.value, self.bigp, axes=1)
+            kernel = self.kernel + jnp.tensordot(self.coeffs.value, self.bigp, axes=1)
         else:
             kernel = self.kernel.value
         bias = self.bias.value
@@ -145,12 +145,12 @@ class AsymConv(nnx.Conv):
             self.bigp = jax.random.normal(keys[-1], shape=(d_int, *self.kernel.shape), dtype=self.param_dtype)
             self.bigp = self.bigp / jnp.linalg.norm(self.bigp.reshape(d_int, -1), axis=1)[:, None, None, None, None]
             self.kernel = self.kernel.value
-            self.parameters = nnx.Param(jnp.zeros(d_int, dtype=self.param_dtype))
+            self.coeffs = nnx.Param(jnp.zeros(d_int, dtype=self.param_dtype))
 
     def __call__(self, inputs:jax.Array) -> jax.Array:
         # Get kernel from intrinsic dimensionality
         if self.d_int:
-            kernel = self.kernel + jnp.tensordot(self.parameters.value, self.bigp, axes=1)
+            kernel = self.kernel + jnp.tensordot(self.coeffs.value, self.bigp, axes=1)
         else:
             kernel = self.kernel.value
         bias = self.bias.value
