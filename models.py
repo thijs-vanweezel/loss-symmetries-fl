@@ -54,8 +54,8 @@ class AsymLinear(nnx.Linear):
         if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
         if dimfrac: 
             dim = int(dimfrac*self.kernel.size)
-            self.bigp = jax.random.normal(keys[-1], shape=(dim, *self.kernel.shape), dtype=self.param_dtype)
-            if dim: self.bigp = self.bigp / jnp.linalg.norm(self.bigp.reshape(dim, -1), axis=1)[:, None, None]
+            self.randmat = jax.random.normal(keys[-1], shape=(dim, *self.kernel.shape), dtype=self.param_dtype)
+            if dim: self.randmat = self.randmat / jnp.linalg.norm(self.randmat.reshape(dim, -1), axis=1)[:, None, None]
             self.kernel = self.kernel.value
             self.coeffs = nnx.Param(jnp.zeros(dim, dtype=self.param_dtype))
 
@@ -64,7 +64,7 @@ class AsymLinear(nnx.Linear):
         kernel = self.kernel
         # Get kernel from intrinsic dimensionality (before everything to recover kernel shape)
         if self.dimfrac:
-            kernel = kernel + jnp.tensordot(self.coeffs, self.bigp, axes=1)
+            kernel = kernel + jnp.tensordot(self.coeffs, self.randmat, axes=1)
         # Apply SyRe (before wasym to avoid biasing the masked weights)
         if self.ssigma>0.:
             bias = bias + self.randb * self.ssigma
@@ -143,8 +143,8 @@ class AsymConv(nnx.Conv):
         if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
         if dimfrac: 
             dim = int(dimfrac*self.kernel.size)
-            self.bigp = jax.random.normal(keys[-1], shape=(dim, *self.kernel.shape), dtype=self.param_dtype)
-            if dim: self.bigp = self.bigp / jnp.linalg.norm(self.bigp.reshape(dim, -1), axis=1)[:, None, None, None, None]
+            self.randmat = jax.random.normal(keys[-1], shape=(dim, *self.kernel.shape), dtype=self.param_dtype)
+            if dim: self.randmat = self.randmat / jnp.linalg.norm(self.randmat.reshape(dim, -1), axis=1)[:, None, None, None, None]
             self.kernel = self.kernel.value
             self.coeffs = nnx.Param(jnp.zeros(dim, dtype=self.param_dtype))
 
@@ -153,7 +153,7 @@ class AsymConv(nnx.Conv):
         kernel = self.kernel
         # Get kernel from intrinsic dimensionality (before everything to recover kernel shape)
         if self.dimfrac:
-            kernel = kernel + jnp.tensordot(self.coeffs, self.bigp, axes=1)
+            kernel = kernel + jnp.tensordot(self.coeffs, self.randmat, axes=1)
         # Apply SyRe (before wasym to avoid biasing the masked weights)
         if self.ssigma>0.:
             bias = bias + self.randb * self.ssigma
