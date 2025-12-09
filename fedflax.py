@@ -1,6 +1,6 @@
 import os
-os.environ["XLA_FLAGS"] = "--xla_gpu_strict_conv_algorithm_picker=false"
-os.environ["XLA_FLAGS"] += " --xla_gpu_deterministic_ops=true"
+os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
+os.environ["XLA_FLAGS"] += " --xla_gpu_strict_conv_algorithm_picker=false"
 import jax, numpy as np
 from functools import reduce
 from npy_append_array import NpyAppendArray
@@ -135,6 +135,8 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
                 patience += 1
             else:
                 patience = 1
+        else:
+            print(f"round {r} ({epoch} local epochs)")
         r += 1
     
     # Save final params
