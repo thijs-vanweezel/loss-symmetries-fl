@@ -1,4 +1,4 @@
-import jax, optax
+import jax, optax, pickle
 from jax import numpy as jnp
 from flax import nnx
 from functools import reduce
@@ -51,3 +51,14 @@ def functional_drift(models, ds_test):
     logits_mean = logits.mean(0)
     drift = jnp.abs(logits - logits_mean).mean((1,2))
     return drift
+
+def save_model(model, filename):
+    _struct, state = nnx.split(model, ...)
+    pickle.dump(state, open(filename, "wb"))
+
+def load_model(model_initializer, filename, **kwargs):
+    abstract_model = nnx.eval_shape(model_initializer, **kwargs)
+    struct, _state = nnx.split(abstract_model, ...)
+    state = pickle.load(open(filename, "rb"))
+    model = nnx.merge(struct, state)
+    return model
