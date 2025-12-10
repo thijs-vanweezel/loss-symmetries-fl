@@ -56,8 +56,12 @@ def save_model(model, filename):
     _struct, state = nnx.split(model, ...)
     pickle.dump(state, open(filename, "wb"))
 
-def load_model(model_initializer, filename, **kwargs):
-    abstract_model = nnx.eval_shape(model_initializer, **kwargs)
+def load_model(return_model, filename, **kwargs):
+    """Args:
+        return_model: Function or class that returns the model when called with **kwargs
+        filename: File from which to load the model state
+    """
+    abstract_model = nnx.eval_shape(return_model, **kwargs)
     struct, _state = nnx.split(abstract_model, ...)
     state = pickle.load(open(filename, "rb"))
     model = nnx.merge(struct, state)
