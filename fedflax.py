@@ -8,7 +8,7 @@ from jax import numpy as jnp
 from flax import nnx
 from functools import partial
 from tqdm.auto import tqdm
-from utils import err_fn
+from utils import save_model, load_model
 
 def save(models, filename, n, overwrite):
         with NpyAppendArray(filename, delete_if_exists=overwrite) as f:
@@ -48,7 +48,8 @@ def cast(module_g, n):
     models = nnx.merge(struct, params_all)
     return models
 
-def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str="early", filename:str=None, n=4, max_patience:int=None, rounds:int|str="early", val_fn=None):
+def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str="early", filename:str=None, n_clients=4, 
+          max_patience:int=None, rounds:int|str="early", val_fn=None, tmp_file:str="./tmp_model_state_save"):
     """
     Federated training loop. 
     Args:
@@ -59,24 +60,25 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
         ds_val: Optional iterable validation dataset with signature ( y, *xs ), of which both arguments have shape ( n_clients, batch_size, ... )
         local_epochs: Number of local epochs per communication round, or "early" for early stopping based on validation loss
         filename: If provided, saves model parameters to this file at each epoch
-        n: Number of clients
+        n_clients: Number of clients
         max_patience: Maximum patience for early stopping (if local_epochs or rounds is "early")
         rounds: Number of communication rounds, or "early" for early stopping based on validation loss
         val_fn: Validation function, necessarily a minimization metric, with signature ( model, y, *xs ) -> loss
     Returns:
-        The final local models before aggregation. To aggregate;
+        The final local models before aggregation and the number of rounds it took to converge. To aggregate;
         ```
         from fedflax import train, get_updates, aggregate
         model_init = ... # initialize global model
-        models = train(model_init, ...) # train with desired arguments
+        models, _rounds = train(model_init, ...) # train with desired arguments
         updates = get_updates(model_init, models)
         model_g = aggregate(model_init, updates)
         ```
     """
-    # Validation function that can be used as stand-alone
-    local_val_fn = nnx.jit(nnx.vmap(
-        val_fn or err_fn, in_axes=0
-    ))
+    # Validation function for local early stopping that can be used as stand-alone
+    if isinstance(local_epochs, str):
+        local_val_fn = nnx.jit(nnx.vmap(
+            val_fn, in_axes=0
+        ))
 
     # Communication rounds
     val_losses = []
@@ -84,7 +86,7 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
     patience = 1
     while (r!=rounds) if isinstance(rounds, int) else (patience<=max_patience):
         # Parallelize global model and optimizers
-        models = cast(model_g, n)
+        models = cast(model_g, n_clients)
         opts = nnx.vmap(opt_create)(models)
         
         # Local training
@@ -93,7 +95,7 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
         epoch = 0
         while (epoch!=local_epochs) if isinstance(local_epochs, int) else (local_patience<=max_patience):
             # Collect and save params for visualization
-            if filename: save(models, filename, n, overwrite=(r==0 and epoch==0))
+            if filename: save(models, filename, n_clients, overwrite=(r==0 and epoch==0))
             # Iterate over batches
             for batch, (y, *xs) in enumerate(bar := tqdm(ds_train, leave=False)):
                 # Create train step function if first iteration
@@ -120,27 +122,33 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
         model_g = aggregate(model_g, updates)
         
         if rounds=="early":
-            # Initialize validation function
+            # Initialize validation function for global early stopping
             if r==0:
                 val_fn = nnx.jit(nnx.vmap(
-                    val_fn or err_fn, in_axes=(None,0)+(0,)*n_inputs
+                    val_fn, in_axes=(None,0)+(0,)*n_inputs
                 ))
             # Evaluate aggregated model
             val = reduce(lambda a, batch: a+val_fn(model_g, *batch).mean(), ds_val, 0.)
             val /= len(ds_val)
             val_losses.append(val)       
             print(f"round {r} ({epoch} local epochs); global validation score: {val:.4f}")
-            # Check if model is converged
+            # Check whether model has converged
             if r>=1 and val>=val_losses[-patience-1]:
                 patience += 1
             else:
+                # ... otherwise continue training and save best model
                 patience = 1
+                save_model(models, tmp_file)
+        # If not early stopping, just print progress and save model
         else:
             print(f"round {r} ({epoch} local epochs)")
         r += 1
     
     # Save final params
-    if filename: save(cast(model_g, n), filename, n, overwrite=False)
+    if filename: save(cast(model_g, n_clients), filename, n_clients, overwrite=False)
 
     # Return the final local models, i.e., before aggregation
+    if isinstance(rounds, str):
+        models = load_model(lambda: models, tmp_file)
+        os.remove(tmp_file)
     return models, r-patience
