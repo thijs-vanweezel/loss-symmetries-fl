@@ -262,7 +262,7 @@ class ResNetBlock(nnx.Module):
 
 # Resnet for ImageNet ([3,4,6,3] for 34 layers, [2,2,2,2] for 18 layers)
 class ResNet(nnx.Module):
-    def __init__(self, key:jax.dtypes.prng_key, layers:tuple[int,...]=[2,2,2,2], kernels:tuple[int,...]=[64,128,256,512], 
+    def __init__(self, key=jax.random.key(0), layers:tuple[int,...]=[2,2,2,2], kernels:tuple[int,...]=[64,128,256,512], 
                  channels_in:int=3, dim_out:int=1000, dimexp:bool=False, wasym:str|None=None, kappa:float=1., sigma:float=0., 
                  activation=nnx.relu, orderbias:bool=False, normweights:bool=False, dimfrac:float|None=None, **kwargs):
         # Set some params
@@ -300,7 +300,7 @@ class ResNet(nnx.Module):
 
 # LeNet-5 for 36X60 images + 3 auxiliary features
 class LeNet(nnx.Module):
-    def __init__(self, key:jax.dtypes.prng_key, dimexp=False, wasym=None, kappa=1., dim_out=2, sigma=0., 
+    def __init__(self, key=jax.random.key(0), dimexp=False, wasym=None, kappa=1., dim_out=2, sigma=0., 
                  activation=nnx.relu, orderbias=False, channels_in=1, normweights=False, dimfrac=None):
         # Some params
         super().__init__()
