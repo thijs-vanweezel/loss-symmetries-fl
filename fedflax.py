@@ -143,4 +143,4 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
     if filename: save(cast(model_g, n), filename, n, overwrite=False)
 
     # Return the final local models, i.e., before aggregation
-    return models, r
+    return models, r-patience
