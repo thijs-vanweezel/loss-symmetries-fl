@@ -49,7 +49,7 @@ def cast(module_g, n):
     return models
 
 def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str="early", filename:str=None, n_clients=4, 
-          max_patience:int=None, rounds:int|str="early", val_fn=None, tmp_file:str="./tmp_model_state_save"):
+          max_patience:int=None, rounds:int|str="early", val_fn=None, tmp_file:str=None):
     """
     Federated training loop. 
     Args:
@@ -74,6 +74,7 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
         model_g = aggregate(model_init, updates)
         ```
     """
+    tmp_file = tmp_file or f"tmp_fedflax_{hash(model_g.__repr__())}.pkl"
     # Validation function for local early stopping that can be used as stand-alone
     if isinstance(local_epochs, str):
         local_val_fn = nnx.jit(nnx.vmap(
