@@ -152,4 +152,4 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
     if isinstance(rounds, str):
         models = load_model(lambda: models, tmp_file)
         os.remove(tmp_file)
-    return models, r-patience
+    return models, r-patience-1
