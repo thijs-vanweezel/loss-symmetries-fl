@@ -37,7 +37,7 @@ def mask_linear_random(in_dim, out_dim, exp, key, **kwargs):
 # And kernel normalization consistent with https://github.com/o-laurent/bayes_posterior_symmetry_exploration/blob/main/symmetries/scale_resnet.py#L166
 class AsymLinear(nnx.Linear):
     def __init__(self, in_features:int, out_features:int, key:jax.dtypes.prng_key, wasym:str|None=None, 
-                 kappa:float=1., sigma:float=0., orderbias:bool=False, normweights:bool=False, dimfrac:float|None=None, **kwargs):
+                 kappa:float=1., sigma:float=0., orderbias:bool=False, normweights:bool=False, lorafrac:float|None=None, **kwargs):
         keys = jax.random.split(key, 4)
         super().__init__(in_features, out_features, rngs=nnx.Rngs(keys[0]), use_bias=True, **kwargs)
         # Check if asymmetry is to be applied
@@ -46,25 +46,26 @@ class AsymLinear(nnx.Linear):
         self.kappa = kappa
         self.orderbias = orderbias
         self.normweights = normweights
-        self.dimfrac = bool(dimfrac)
+        self.lora = bool(lorafrac)
         # Create asymmetry params
         if wasym=="densest": self.wmask = mask_linear_densest(*self.kernel.shape, dtype=self.param_dtype)
         elif wasym=="random": self.wmask = mask_linear_random(*self.kernel.shape, key=keys[1], exp=1/3, dtype=self.param_dtype)
         if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
         if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
-        if dimfrac: 
-            dim = int(dimfrac*self.kernel.size)
-            self.randmat = jax.random.normal(keys[-1], shape=(dim, *self.kernel.shape), dtype=self.param_dtype)
-            if dim: self.randmat = self.randmat / jnp.linalg.norm(self.randmat.reshape(dim, -1), axis=1)[:, None, None]
+        if self.lora:
             self.kernel = self.kernel.value
-            self.coeffs = nnx.Param(jnp.zeros(dim, dtype=self.param_dtype))
+            loradim = max(1, int(lorafrac*(in_features+out_features)/2))
+            shapeA = (loradim, out_features)
+            shapeB = (in_features, loradim)
+            self.matA = nnx.Param(jax.random.normal(keys[-1], shape=shapeA, dtype=self.param_dtype)*1e-3)
+            self.matB = nnx.Param(jnp.zeros(shapeB, dtype=self.param_dtype))
 
     def __call__(self, inputs:jax.Array) -> jax.Array:
         bias = self.bias
         kernel = self.kernel
-        # Get kernel from intrinsic dimensionality (before everything to recover kernel shape)
-        if self.dimfrac:
-            kernel = kernel + jnp.tensordot(self.coeffs, self.randmat, axes=1)
+        # Get kernel from LoRA
+        if self.lora:
+            kernel = kernel + self.matB @ self.matA
         # Apply SyRe (before wasym to avoid biasing the masked weights)
         if self.ssigma>0.:
             bias = bias + self.randb * self.ssigma
@@ -126,7 +127,7 @@ def mask_conv_random(kernel_size, in_channels, out_channels, key, exp:float, **k
 # And kernel normalization consistent with https://github.com/o-laurent/bayes_posterior_symmetry_exploration/blob/main/symmetries/scale_resnet.py#L166
 class AsymConv(nnx.Conv):
     def __init__(self, in_features:int, out_features:int, kernel_size:tuple[int,...], key:jax.dtypes.prng_key, wasym:str|None=None, 
-                 kappa:float=1., sigma:float=0., orderbias:bool=False, normweights:bool=False, dimfrac:float|None=None, **kwargs):
+                 kappa:float=1., sigma:float=0., orderbias:bool=False, normweights:bool=False, lorafrac:float|None=None, **kwargs):
         keys = jax.random.split(key, 4)
         super().__init__(in_features, out_features, kernel_size, rngs=nnx.Rngs(keys[0]), use_bias=True, **kwargs)
         # Check if asymmetry is to be applied
@@ -135,25 +136,27 @@ class AsymConv(nnx.Conv):
         self.kappa = kappa
         self.orderbias = orderbias
         self.normweights = normweights
-        self.dimfrac = bool(dimfrac)
+        self.lora = bool(lorafrac)
+        self.maybe_broadcast = lambda x: (x,) * len(self.kernel_size) if isinstance(x, int) else tuple(x)
         # Create asymmetry params
         if wasym=="densest": self.wmask = mask_conv_densest(*self.kernel.shape[1:], dtype=self.param_dtype)
         elif wasym=="random": self.wmask = mask_conv_random(*self.kernel.shape[1:], key=keys[1], exp=1/3, dtype=self.param_dtype)
         if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
         if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
-        if dimfrac: 
-            dim = int(dimfrac*self.kernel.size)
-            self.randmat = jax.random.normal(keys[-1], shape=(dim, *self.kernel.shape), dtype=self.param_dtype)
-            if dim: self.randmat = self.randmat / jnp.linalg.norm(self.randmat.reshape(dim, -1), axis=1)[:, None, None, None, None]
+        if self.lora:
             self.kernel = self.kernel.value
-            self.coeffs = nnx.Param(jnp.zeros(dim, dtype=self.param_dtype))
+            loradim = max(1, int(lorafrac*(in_features+out_features)/2))
+            shapeA = (*self.maybe_broadcast(kernel_size), loradim, out_features)
+            shapeB = (*self.maybe_broadcast(kernel_size), in_features, loradim)
+            self.matA = nnx.Param(jax.random.normal(keys[-1], shape=shapeA, dtype=self.param_dtype)*1e-3)
+            self.matB = nnx.Param(jnp.zeros(shapeB, dtype=self.param_dtype))
 
     def __call__(self, inputs:jax.Array) -> jax.Array:
         bias = self.bias
         kernel = self.kernel
-        # Get kernel from intrinsic dimensionality (before everything to recover kernel shape)
-        if self.dimfrac:
-            kernel = kernel + jnp.tensordot(self.coeffs, self.randmat, axes=1)
+        # Get kernel from LoRA
+        if self.lora:
+            kernel = kernel + self.matB @ self.matA
         # Apply SyRe (before wasym to avoid biasing the masked weights)
         if self.ssigma>0.:
             bias = bias + self.randb * self.ssigma
@@ -175,14 +178,13 @@ class AsymConv(nnx.Conv):
         inputs, kernel, bias = self.promote_dtype(
             (inputs, kernel, bias), dtype=self.dtype
         )
-        broadcast = lambda x: (x,) * len(self.kernel_size) if isinstance(x, int) else tuple(x)
         y = self.conv_general_dilated(
             inputs,
             kernel,
-            broadcast(self.strides), 
+            self.maybe_broadcast(self.strides), 
             self.padding, # restricted to "SAME" or "VALID"
-            lhs_dilation=broadcast(self.input_dilation),
-            rhs_dilation=broadcast(self.kernel_dilation),
+            lhs_dilation=self.maybe_broadcast(self.input_dilation),
+            rhs_dilation=self.maybe_broadcast(self.kernel_dilation),
             dimension_numbers=_conv_dimension_numbers(inputs.shape),
             feature_group_count=self.feature_group_count,
             precision=self.precision,
@@ -193,7 +195,7 @@ class AsymConv(nnx.Conv):
 # Used in resnet
 class ResNetBlock(nnx.Module):
     def __init__(self, key:jax.dtypes.prng_key, in_kernels:int, out_kernels:int, stride:int=1, wasym:bool=False, 
-                 kappa:float=1., sigma:float=0., activation=nnx.relu, orderbias:bool=False, normweights:bool=False, dimfrac:float|None=None):
+                 kappa:float=1., sigma:float=0., activation=nnx.relu, orderbias:bool=False, normweights:bool=False, lorafrac:float|None=None):
         super().__init__()
         keys = jax.random.split(key, 5)
         self.stride = stride
@@ -209,7 +211,7 @@ class ResNetBlock(nnx.Module):
             sigma,
             orderbias,
             normweights,
-            dimfrac,
+            lorafrac,
             strides=(stride,stride),
             padding="SAME",
             param_dtype=jnp.bfloat16,
@@ -226,7 +228,7 @@ class ResNetBlock(nnx.Module):
             sigma,
             orderbias,
             normweights,
-            dimfrac,
+            lorafrac,
             padding="SAME",
             param_dtype=jnp.bfloat16,
             dtype=jnp.bfloat16
@@ -242,7 +244,6 @@ class ResNetBlock(nnx.Module):
                 sigma, 
                 orderbias, 
                 normweights,
-                dimfrac,
                 strides=(stride, stride), 
                 dtype=jnp.bfloat16, 
                 param_dtype=jnp.bfloat16
@@ -264,14 +265,14 @@ class ResNetBlock(nnx.Module):
 class ResNet(nnx.Module):
     def __init__(self, key=jax.random.key(0), layers:tuple[int,...]=[2,2,2,2], kernels:tuple[int,...]=[64,128,256,512], 
                  channels_in:int=3, dim_out:int=1000, dimexp:bool=False, wasym:str|None=None, kappa:float=1., sigma:float=0., 
-                 activation=nnx.relu, orderbias:bool=False, normweights:bool=False, dimfrac:float|None=None, **kwargs):
+                 activation=nnx.relu, orderbias:bool=False, normweights:bool=False, lorafrac:float|None=None, **kwargs):
         # Set some params
         super().__init__(**kwargs)
         self.dimexp = dimexp
         # Keys
         keys = iter(jax.random.split(key, sum(layers)+2))
         # Layers
-        self.conv = AsymConv(channels_in, 64, (7,7), next(keys), wasym, kappa, sigma, orderbias, normweights, dimfrac,
+        self.conv = AsymConv(channels_in, 64, (7,7), next(keys), wasym, kappa, sigma, orderbias, normweights, lorafrac,
                              strides=(2,2), padding="SAME", param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
         self.activation = activation
         self.layers = []
@@ -281,9 +282,9 @@ class ResNet(nnx.Module):
                 k_out = kernels[j]
                 s = 2 if i==0 and j>0 else 1
                 self.layers.append(ResNetBlock(next(keys), k_in, k_out, stride=s, wasym=wasym, kappa=kappa, sigma=sigma, 
-                                               activation=activation, orderbias=orderbias, normweights=normweights, dimfrac=dimfrac))
+                                               activation=activation, orderbias=orderbias, normweights=normweights, lorafrac=lorafrac))
         self.fc = AsymLinear(kernels[-1], dim_out, next(keys), wasym, kappa, sigma, orderbias, normweights=False, 
-                             dimfrac=dimfrac, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
+                             lorafrac=lorafrac, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
 
     def __call__(self, x, z=None, train=True):
         # Apply dimension expansion if desired
@@ -301,7 +302,7 @@ class ResNet(nnx.Module):
 # LeNet-5 for 36X60 images + 3 auxiliary features
 class LeNet(nnx.Module):
     def __init__(self, key=jax.random.key(0), dimexp=False, wasym=None, kappa=1., dim_out=2, sigma=0., 
-                 activation=nnx.relu, orderbias=False, channels_in=1, normweights=False, dimfrac=None):
+                 activation=nnx.relu, orderbias=False, channels_in=1, normweights=False, lorafrac=None):
         # Some params
         super().__init__()
         self.activation = activation
@@ -310,11 +311,11 @@ class LeNet(nnx.Module):
         self.dimexp = dimexp
         # Layers
         keys = jax.random.split(key, 5)
-        self.conv1 = AsymConv(channels_in, 8, (4,4), keys[0], wasym, kappa, sigma, orderbias, normweights, dimfrac, padding="VALID", param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
-        self.conv2 = AsymConv(8, 16, (4,4), keys[1], wasym, kappa, sigma, orderbias, normweights, dimfrac, padding="VALID", param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
-        self.fc1 = AsymLinear(flat_shape*16+3, 128, keys[2], wasym, kappa, sigma, orderbias, normweights, dimfrac, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
-        self.fc2 = AsymLinear(128, 64, keys[3], wasym, kappa, sigma, orderbias, normweights, dimfrac, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
-        self.fc3 = AsymLinear(64, dim_out, keys[4], wasym, kappa, sigma, orderbias, normweights=False, dimfrac=dimfrac, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
+        self.conv1 = AsymConv(channels_in, 8, (4,4), keys[0], wasym, kappa, sigma, orderbias, normweights, lorafrac, padding="VALID", param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
+        self.conv2 = AsymConv(8, 16, (4,4), keys[1], wasym, kappa, sigma, orderbias, normweights, lorafrac, padding="VALID", param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
+        self.fc1 = AsymLinear(flat_shape*16+3, 128, keys[2], wasym, kappa, sigma, orderbias, normweights, lorafrac, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
+        self.fc2 = AsymLinear(128, 64, keys[3], wasym, kappa, sigma, orderbias, normweights, lorafrac, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
+        self.fc3 = AsymLinear(64, dim_out, keys[4], wasym, kappa, sigma, orderbias, normweights=False, lorafrac=lorafrac, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
     
     def __call__(self, x, z, train=None):
         # Apply dimension expansion if desired
