@@ -15,13 +15,16 @@ def save(models, filename, n, overwrite):
             f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(nnx.split(models, (nnx.Param, nnx.BatchStat), ...)[1])], axis=1))
 
 # Parallelized train step
-def return_train_step(ell, n_inputs):
-    @nnx.jit
-    @nnx.vmap(in_axes=(0,None,0,0)+(0,)*n_inputs)
+def return_train_step(ell, n_inputs, vectorize=True):
     def train_step(model, model_g, opt, y, *xs):
         loss, grad = nnx.value_and_grad(ell)(model, model_g, y, *xs)
         opt.update(grad)
         return loss
+    if vectorize:
+        train_step = nnx.vmap(train_step, in_axes=(0,None,0,0)+(0,)*n_inputs)
+    else:
+        train_step = nnx.vmap(train_step, in_axes=(None,None,None,0)+(0,)*n_inputs)
+    train_step = nnx.jit(train_step)
     return train_step
 
 # Get updates, i.e., difference between initial model and locally converged models
@@ -49,7 +52,7 @@ def cast(module_g, n):
     return models
 
 # Local training loop
-def train_local(models, opts, n_clients, ds_train, ds_val, ell, model_g=None, local_epochs="early", max_patience=None, filename=None, r=0, rounds="N/A", local_val_fn=None):
+def train_local(models, opts, n_clients, ds_train, ds_val, ell, model_g=None, local_epochs="early", max_patience=None, filename=None, r=0, rounds="N/A", local_val_fn=None, parallel=True):
         local_val_losses = []
         local_patience = 1
         epoch = 0
@@ -60,7 +63,7 @@ def train_local(models, opts, n_clients, ds_train, ds_val, ell, model_g=None, lo
             for batch, (y, *xs) in enumerate(bar := tqdm(ds_train, leave=False)):
                 # Create train step function if first iteration
                 if batch==0 and epoch==0 and r==0:
-                    train_step = return_train_step(ell, n_inputs:=len(xs))
+                    train_step = return_train_step(ell, n_inputs:=len(xs), vectorize=parallel)
                 # Train step
                 loss = train_step(models, model_g, opts, y, *xs)
                 # Inform user
