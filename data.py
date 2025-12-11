@@ -177,7 +177,7 @@ def imagenet_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jn
 
     return jnp.stack(clients_labels, 0), jnp.stack(clients_imgs, 0)
 
-def get_data(skew:str="feature", batch_size=128, n_clients=4, beta:float=0, dataset=0, partition="train", n_classes=1000, **kwargs)->DataLoader:
+def get_data(skew:str="label", batch_size=128, n_clients=4, beta:float=0, dataset=0, partition="train", n_classes=1000, **kwargs)->DataLoader:
     assert beta>=0 and beta<=1, "Beta must be between 0 and 1"
     beta = 1-beta if skew=="overlap" else beta
     # Fractions derived
