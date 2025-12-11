@@ -15,16 +15,13 @@ def save(models, filename, n, overwrite):
             f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(nnx.split(models, (nnx.Param, nnx.BatchStat), ...)[1])], axis=1))
 
 # Parallelized train step
-def return_train_step(ell, n_inputs, vectorize=True):
+def return_train_step(ell, n_inputs):
+    @nnx.jit
+    @nnx.vmap(in_axes=(0,None,0,0)+(0,)*n_inputs)
     def train_step(model, model_g, opt, y, *xs):
         loss, grad = nnx.value_and_grad(ell)(model, model_g, y, *xs)
         opt.update(grad)
         return loss
-    if vectorize:
-        train_step = nnx.vmap(train_step, in_axes=(0,None,0,0)+(0,)*n_inputs)
-    else:
-        train_step = nnx.vmap(train_step, in_axes=(None,None,None,0)+(0,)*n_inputs)
-    train_step = nnx.jit(train_step)
     return train_step
 
 # Get updates, i.e., difference between initial model and locally converged models
@@ -50,36 +47,6 @@ def cast(module_g, n):
     params_all = jax.tree.map(lambda x: jnp.repeat(jnp.expand_dims(x, 0), n, 0), params_g)
     models = nnx.merge(struct, params_all)
     return models
-
-# Local training loop
-def train_local(models, opts, n_clients, ds_train, ds_val, ell, model_g=None, local_epochs="early", max_patience=None, filename=None, r=0, rounds="N/A", local_val_fn=None, parallel=True):
-        local_val_losses = []
-        local_patience = 1
-        epoch = 0
-        while (epoch!=local_epochs) if isinstance(local_epochs, int) else (local_patience<=max_patience):
-            # Collect and save params for visualization
-            if filename: save(models, filename, n_clients, overwrite=(r==0 and epoch==0))
-            # Iterate over batches
-            for batch, (y, *xs) in enumerate(bar := tqdm(ds_train, leave=False)):
-                # Create train step function if first iteration
-                if batch==0 and epoch==0 and r==0:
-                    train_step = return_train_step(ell, n_inputs:=len(xs), vectorize=parallel)
-                # Train step
-                loss = train_step(models, model_g, opts, y, *xs)
-                # Inform user
-                bar.set_description(f"Round {r}/{rounds}, epoch {epoch}/{local_epochs} (local validation score: {'N/A' if epoch==0 or isinstance(local_epochs, int) else val}, local batch loss: {loss.mean():.4f})")
-            # Evaluate on local validation
-            if not isinstance(local_epochs, int):
-                val = reduce(lambda a, batch: a+local_val_fn(models, *batch).mean(), ds_val, 0.)
-                val /= len(ds_val)
-                local_val_losses.append(val)
-                # Check if local models are converged
-                if epoch>=1 and val>=local_val_losses[-local_patience-1]:
-                    local_patience += 1
-                else:
-                    local_patience = 1
-            epoch += 1
-        return models, n_inputs, epoch
 
 def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str="early", filename:str=None, n_clients=4, 
           max_patience:int=None, rounds:int|str="early", val_fn=None, tmp_file:str=None):
@@ -124,7 +91,32 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
         opts = nnx.vmap(opt_create)(models)
         
         # Local training
-        models, n_inputs, epochs = train_local(models, opts, n_clients, ds_train, ds_val, ell, model_g, local_epochs, max_patience, filename, r, rounds, local_val_fn)
+        local_val_losses = []
+        local_patience = 1
+        epoch = 0
+        while (epoch!=local_epochs) if isinstance(local_epochs, int) else (local_patience<=max_patience):
+            # Collect and save params for visualization
+            if filename: save(models, filename, n_clients, overwrite=(r==0 and epoch==0))
+            # Iterate over batches
+            for batch, (y, *xs) in enumerate(bar := tqdm(ds_train, leave=False)):
+                # Create train step function if first iteration
+                if batch==0 and epoch==0 and r==0:
+                    train_step = return_train_step(ell, n_inputs:=len(xs))
+                # Train step
+                loss = train_step(models, model_g, opts, y, *xs)
+                # Inform user
+                bar.set_description(f"Round {r}/{rounds}, epoch {epoch}/{local_epochs} (local validation score: {'N/A' if epoch==0 or isinstance(local_epochs, int) else val}, local batch loss: {loss.mean():.4f})")
+            # Evaluate on local validation
+            if not isinstance(local_epochs, int):
+                val = reduce(lambda a, batch: a+local_val_fn(models, *batch).mean(), ds_val, 0.)
+                val /= len(ds_val)
+                local_val_losses.append(val)
+                # Check if local models are converged
+                if epoch>=1 and val>=local_val_losses[-local_patience-1]:
+                    local_patience += 1
+                else:
+                    local_patience = 1
+            epoch += 1
         
         # Aggregate
         updates = get_updates(model_g, models)
@@ -140,7 +132,7 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
             val = reduce(lambda a, batch: a+val_fn(model_g, *batch).mean(), ds_val, 0.)
             val /= len(ds_val)
             val_losses.append(val)       
-            print(f"round {r} ({epochs} local epochs); global validation score: {val:.4f}")
+            print(f"round {r} ({epoch} local epochs); global validation score: {val:.4f}")
             # Check whether model has converged
             if r>=1 and val>=val_losses[-patience-1]:
                 patience += 1
@@ -150,7 +142,7 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
                 save_model(models, tmp_file)
         # If not early stopping, just print progress and save model
         else:
-            print(f"round {r} ({epochs} local epochs)")
+            print(f"round {r} ({epoch} local epochs)")
         r += 1
     
     # Save final params
