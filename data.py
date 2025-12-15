@@ -138,13 +138,13 @@ class CityScapes(Dataset):
         img = torchvision.io.decode_image(filepath, mode="RGB").float() / 255.
         img = torchvision.transforms.Resize(256)(img)
         img = torchvision.transforms.CenterCrop(224)(img)
-        img = torch.permute(img, (2,0,1))
+        img = torch.permute(img, (1,2,0))
         # Load label image
         labelpath = filepath.replace("leftImg8bit", "gtFine").replace(".png", "_labelIds.png")
         label = torchvision.io.decode_image(labelpath).long()
         label = torchvision.transforms.Resize(256, interpolation=torchvision.transforms.InterpolationMode.NEAREST)(label)
         label = torchvision.transforms.CenterCrop(224)(label)
-        label = torch.permute(label, (2,0,1))
+        label = torch.permute(label, (1,2,0))
         return label, img
 
 def gaze_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
