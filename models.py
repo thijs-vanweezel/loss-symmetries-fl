@@ -349,7 +349,6 @@ class ResNetAutoEncoder(nnx.Module):
         x = self.spp(x)
         # Decode using lateral representations
         for z, id_conv, conv in zip(reversed(laterals[:-1]), self.id_convs, self.convs):
-            print(x.shape, z.shape)
             # Match encoded material's size with lateral's
             x = jax.image.resize(x, (*z.shape[:-1], x.shape[-1]), method="bilinear")
             # Match lateral's channels with desired number of channels
