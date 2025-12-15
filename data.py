@@ -103,6 +103,50 @@ class ImageNet(Dataset):
         label = torch.eye(self.n_classes)[label]
         return label, img
 
+class CityScapes(Dataset):
+    def __init__(self, path:str="./cityscapes/", partition:str="train", n_clients:int=4):
+        g = os.walk(os.path.join(path, "leftImg8bit", partition))
+        # Get location names
+        cities = next(g)[1]
+        # Dedicate a client to each class
+        k, m = divmod(len(cities), n_clients)
+        class_splits = {cities[idx]: client for client in range(n_clients) for idx in range(client*k+min(client,m), (client+1)*k+min(client+1,m))}
+        # Assign sample paths to each client
+        self.data = {client: [] for client in range(n_clients)}
+        for dirname, _, filelist in g:
+            # Assign to client
+            cityname = os.path.basename(dirname)
+            client = class_splits[cityname]
+            filelist = [os.path.join(dirname, filename) for filename in filelist]
+            self.data[client].extend(filelist)
+        # Shuffle so that samples are not ordered by class (note: deterministic)
+        for c in range(n_clients):
+            self.data[c].sort(key=lambda x: hashlib.sha256(str(x).encode()).hexdigest())
+        # Misc attributes
+        self.n_clients = n_clients
+
+    def __len__(self):
+        # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
+        return min([len(files) for files in self.data.values()])*self.n_clients
+    
+    def __getitem__(self, idx):
+        # Load datum
+        c = idx % self.n_clients
+        i = idx // self.n_clients
+        filepath = self.data[c][i]
+        # Load image
+        img = torchvision.io.decode_image(filepath, mode="RGB").float() / 255.
+        img = torchvision.transforms.Resize(256)(img)
+        img = torchvision.transforms.CenterCrop(224)(img)
+        img = torch.permute(img, (2,0,1))
+        # Load label image
+        labelpath = filepath.replace("leftImg8bit", "gtFine").replace(".png", "_labelIds.png")
+        label = torchvision.io.decode_image(labelpath).long()
+        label = torchvision.transforms.Resize(256, interpolation=torchvision.transforms.InterpolationMode.NEAREST)(label)
+        label = torchvision.transforms.CenterCrop(224)(label)
+        label = torch.permute(label, (2,0,1))
+        return label, img
+
 def gaze_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
     Only one type of skew can be applied at a time, with the following options:
@@ -161,7 +205,7 @@ def imagenet_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jn
     imgs = jnp.stack([jnp.asarray(img, dtype=jnp.float32) for img in imgs])
     labels = jnp.stack([jnp.asarray(label, dtype=jnp.float32) for label in labels])
 
-    # Feature skew, by sharing a portion of skewed samples while retaining another portion of client-side samples
+    # Label skew, by sharing a portion of skewed samples while retaining another portion of client-side samples
     if skew=="label":
         indiv_stop = int(indiv_frac*len(imgs)*n_clients)
         clients_idxs = [jnp.asarray(list(range(i, indiv_stop, n_clients)) + list(range(indiv_stop, len(imgs)))) for i in range(n_clients)]
@@ -177,7 +221,7 @@ def imagenet_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jn
 
     return jnp.stack(clients_labels, 0), jnp.stack(clients_imgs, 0)
 
-def get_data(skew:str="label", batch_size=128, n_clients=4, beta:float=0, dataset=0, partition="train", n_classes=1000, **kwargs)->DataLoader:
+def get_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, dataset=0, partition="train", n_classes=1000, **kwargs)->DataLoader:
     assert beta>=0 and beta<=1, "Beta must be between 0 and 1"
     beta = 1-beta if skew=="overlap" else beta
     # Fractions derived
@@ -190,9 +234,14 @@ def get_data(skew:str="label", batch_size=128, n_clients=4, beta:float=0, datase
         dataset = MPIIGaze(n_clients=n_clients, path=os.path.join("MPIIGaze_preprocessed", partition))
         assert skew in ["feature", "overlap", "label"], "Skew must be one of 'feature', 'overlap', or 'label'. For no skew, specify beta=0."
         collate = partial(gaze_collate, n_clients=n_clients, indiv_frac=indiv_frac, skew=skew)
-    else:
+    elif dataset==1:
         dataset = ImageNet(path=os.path.join("imagenet/Data/CLS-LOC", partition), n_clients=n_clients, n_classes=n_classes)
         assert skew in ["overlap", "label"], "Skew must be either 'overlap' or 'label'. For no skew, specify beta=0."
+        collate = partial(imagenet_collate, n_clients=n_clients, indiv_frac=indiv_frac, skew=skew)
+    else:
+        dataset = CityScapes(path="cityscapes/", partition=partition, n_clients=n_clients)
+        assert skew in ["overlap", "feature"], "Skew must be either 'overlap' or 'feature'. For no skew, specify beta=0."
+        skew = "label" if skew=="feature" else "overlap" # functional implementation (i.e., interleaving) is equivalent
         collate = partial(imagenet_collate, n_clients=n_clients, indiv_frac=indiv_frac, skew=skew)
     # Iterable batches
     return DataLoader(
