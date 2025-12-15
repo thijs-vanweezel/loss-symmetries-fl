@@ -307,6 +307,62 @@ class ResNet(nnx.Module):
         x = self.fc(x)
         return x
 
+class ResNetAutoEncoder(nnx.Module):
+    def __init__(self, backboneencoder:ResNet, key=jax.random.key(0), **asymkwargs):
+        keys = jax.random.split(key, 2*len(backboneencoder.layers)+2)
+        self.backboneencoder = backboneencoder
+        self.spp = AsymConv(backboneencoder.layers[-1].conv2.out_features, 128, (3,3), keys[-1], **asymkwargs) # TODO: placeholder for spatial pyramid pooling
+        self.id_convs = []
+        self.convs = []
+        for i, layer in enumerate(reversed(backboneencoder.layers[:-1])):
+            self.id_convs.append(AsymConv(
+                layer.conv2.out_features,
+                128,
+                (1,1),
+                keys[2*i],
+                **asymkwargs
+            ))
+            self.convs.append(AsymConv(
+                128,
+                128,
+                (3,3),
+                keys[2*i+1],
+                **asymkwargs
+            ))
+        self.final_conv = AsymConv(
+            128,
+            backboneencoder.conv.in_features,
+            (3,3),
+            keys[-2],
+            **asymkwargs
+        )
+    def __call__(self, x, train=True):
+        # Encode using backbone's forward pass and save intermediate representations
+        x = x if not self.backboneencoder.dimexp else interleave(x)
+        x = self.backboneencoder.conv(x)
+        x = nnx.max_pool(x, window_shape=(3,3), strides=(2,2), padding="SAME")
+        laterals = []
+        for layer in self.backboneencoder.layers:
+            x = layer(x, train=train)
+            laterals.append(x)
+        # Increase receptive field with SPP
+        x = self.spp(x)
+        # Decode using lateral representations
+        for z, id_conv, conv in zip(reversed(laterals[:-1]), self.id_convs, self.convs):
+            print(x.shape, z.shape)
+            # Match encoded material's size with lateral's
+            x = jax.image.resize(x, (*z.shape[:-1], x.shape[-1]), method="bilinear")
+            # Match lateral's channels with desired number of channels
+            z = id_conv(z)
+            # Sum
+            x = x + z
+            # Convolution over intermediate representation
+            x = conv(x)
+            x = self.backboneencoder.activation(x)
+        # Final convolution to get desired number of output channels
+        x = self.final_conv(x)
+        return x
+
 # LeNet-5 for 36X60 images + 3 auxiliary features
 class LeNet(nnx.Module):
     def __init__(self, key=jax.random.key(0), dimexp=False, wasym=None, kappa=1., dim_out=2, sigma=0., 
