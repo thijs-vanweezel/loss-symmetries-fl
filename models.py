@@ -331,7 +331,7 @@ class ResNetAutoEncoder(nnx.Module):
             ))
         self.final_conv = AsymConv(
             128,
-            backboneencoder.conv.in_features,
+            1,
             (3,3),
             keys[-2],
             **asymkwargs
@@ -360,6 +360,7 @@ class ResNetAutoEncoder(nnx.Module):
             x = self.backboneencoder.activation(x)
         # Final convolution to get desired number of output channels
         x = self.final_conv(x)
+        x = jax.image.resize(x, (x.shape[0], 224, 224, x.shape[-1]), method="bilinear") # TODO: hardcoded output size
         return x
 
 # LeNet-5 for 36X60 images + 3 auxiliary features
