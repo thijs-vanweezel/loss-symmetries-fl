@@ -129,11 +129,12 @@ class AsymConv(nnx.Conv):
     def __init__(self, in_features:int, out_features:int, kernel_size:tuple[int,...], key:jax.dtypes.prng_key, wasym:str|None=None, 
                  kappa:float=1., sigma:float=0., orderbias:bool=False, normweights:bool=False, lorafrac:float|None=None, **kwargs):
         keys = jax.random.split(key, 4)
-        super().__init__(in_features, out_features, kernel_size, rngs=nnx.Rngs(keys[0]), use_bias=True, **kwargs)
+        super().__init__(in_features, out_features, kernel_size, rngs=nnx.Rngs(keys[0]), **kwargs)
         # Check if asymmetry is to be applied
         self.ssigma = sigma
         self.wasym = bool(wasym)
         self.kappa = kappa
+        assert not orderbias or self.use_bias, "Order bias requires use_bias=True"
         self.orderbias = orderbias
         self.normweights = normweights
         self.lora = bool(lorafrac)
@@ -189,7 +190,8 @@ class AsymConv(nnx.Conv):
             feature_group_count=self.feature_group_count,
             precision=self.precision,
         )
-        y += bias.reshape((1,) * (y.ndim - bias.ndim) + bias.shape)
+        if self.use_bias:
+            y += bias.reshape((1,) * (y.ndim - bias.ndim) + bias.shape)
         return y
 
 # Used in resnet
@@ -209,13 +211,14 @@ class ResNetBlock(nnx.Module):
             wasym,
             kappa,
             sigma,
-            orderbias,
+            False, # no order bias due to subsequent BN
             normweights,
             lorafrac,
             strides=(stride,stride),
             padding="SAME",
             param_dtype=jnp.bfloat16,
-            dtype=jnp.bfloat16
+            dtype=jnp.bfloat16,
+            use_bias=False
         )
         self.norm2 = nnx.BatchNorm(out_kernels, rngs=nnx.Rngs(keys[3]), param_dtype=jnp.float32, dtype=jnp.bfloat16)
         self.conv2 = AsymConv(
@@ -226,12 +229,13 @@ class ResNetBlock(nnx.Module):
             wasym,
             kappa,
             sigma,
-            orderbias,
+            False,
             normweights,
             lorafrac,
             padding="SAME",
             param_dtype=jnp.bfloat16,
-            dtype=jnp.bfloat16
+            dtype=jnp.bfloat16,
+            use_bias=False
         )
         if stride>1 and in_kernels!=out_kernels:
             self.id_conv = AsymConv(
@@ -242,11 +246,12 @@ class ResNetBlock(nnx.Module):
                 wasym, 
                 kappa, 
                 sigma, 
-                orderbias, 
+                False, 
                 normweights,
                 strides=(stride, stride), 
                 dtype=jnp.bfloat16, 
-                param_dtype=jnp.bfloat16
+                param_dtype=jnp.bfloat16,
+                use_bias=False
             )
 
     def __call__(self, x, train=True):
@@ -266,15 +271,15 @@ class ResNet(nnx.Module):
     def __init__(self, key=jax.random.key(0), layers:tuple[int,...]=[2,2,2,2], kernels:tuple[int,...]=[64,128,256,512], 
                  channels_in:int=3, dim_out:int=1000, dimexp:bool=False, wasym:str|None=None, kappa:float=1., sigma:float=0., 
                  activation=nnx.relu, orderbias:bool=False, normweights:bool=False, lorafrac:float|None=None, **kwargs):
+        assert len(layers)==len(kernels)
         # Set some params
         super().__init__(**kwargs)
         self.dimexp = dimexp
         # Keys
-        keys = iter(jax.random.split(key, sum(layers)+2))
+        keys = iter(jax.random.split(key, sum(layers)+3))
         # Layers
         self.conv = AsymConv(channels_in, 64, (7,7), next(keys), wasym, kappa, sigma, orderbias, normweights, lorafrac,
                              strides=(2,2), padding="SAME", param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
-        self.activation = activation
         self.layers = []
         for j, l in enumerate(layers):
             for i in range(l):
@@ -283,6 +288,8 @@ class ResNet(nnx.Module):
                 s = 2 if i==0 and j>0 else 1
                 self.layers.append(ResNetBlock(next(keys), k_in, k_out, stride=s, wasym=wasym, kappa=kappa, sigma=sigma, 
                                                activation=activation, orderbias=orderbias, normweights=normweights, lorafrac=lorafrac))
+        self.bn = nnx.BatchNorm(kernels[-1], rngs=nnx.Rngs(next(keys)), param_dtype=jnp.float32, dtype=jnp.bfloat16)
+        self.activation = activation
         self.fc = AsymLinear(kernels[-1], dim_out, next(keys), wasym, kappa, sigma, orderbias, normweights=False, 
                              lorafrac=lorafrac, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
 
@@ -291,11 +298,12 @@ class ResNet(nnx.Module):
         x = x if not self.dimexp else interleave(x)
         # Forward pass
         x = self.conv(x)
-        x = self.activation(x)
         x = nnx.max_pool(x, window_shape=(3,3), strides=(2,2), padding="SAME")
         for layer in self.layers:
             x = layer(x, train=train)
-        x = jnp.mean(x, axis=(1,2))
+        x = self.bn(x, use_running_average=not train)
+        x = self.activation(x)
+        x = jnp.mean(x, axis=(1,2), dtype=jnp.float32)
         x = self.fc(x)
         return x
 
