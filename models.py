@@ -311,7 +311,9 @@ class ResNetAutoEncoder(nnx.Module):
     def __init__(self, backboneencoder:ResNet, key=jax.random.key(0), **asymkwargs):
         keys = jax.random.split(key, 2*len(backboneencoder.layers)+2)
         self.backboneencoder = backboneencoder
-        self.spp = AsymConv(backboneencoder.layers[-1].conv2.out_features, 128, (3,3), keys[-1], **asymkwargs) # TODO: placeholder for spatial pyramid pooling
+        self.spp = AsymConv( # TODO: placeholder for spatial pyramid pooling
+            backboneencoder.layers[-1].conv2.out_features, 128, (3,3), keys[-1], param_dtype=jnp.bfloat16, dtype=jnp.bfloat16, **asymkwargs
+        ) 
         self.id_convs = []
         self.convs = []
         for i, layer in enumerate(reversed(backboneencoder.layers[:-1])):
@@ -320,6 +322,8 @@ class ResNetAutoEncoder(nnx.Module):
                 128,
                 (1,1),
                 keys[2*i],
+                param_dtype=jnp.bfloat16,
+                dtype=jnp.bfloat16,
                 **asymkwargs
             ))
             self.convs.append(AsymConv(
@@ -327,6 +331,8 @@ class ResNetAutoEncoder(nnx.Module):
                 128,
                 (3,3),
                 keys[2*i+1],
+                param_dtype=jnp.bfloat16,
+                dtype=jnp.bfloat16,
                 **asymkwargs
             ))
         self.final_conv = AsymConv(
@@ -334,6 +340,8 @@ class ResNetAutoEncoder(nnx.Module):
             1,
             (3,3),
             keys[-2],
+            param_dtype=jnp.bfloat16,
+            dtype=jnp.bfloat16,
             **asymkwargs
         )
     def __call__(self, x, train=True):
@@ -350,7 +358,7 @@ class ResNetAutoEncoder(nnx.Module):
         # Decode using lateral representations
         for z, id_conv, conv in zip(reversed(laterals[:-1]), self.id_convs, self.convs):
             # Match encoded material's size with lateral's
-            x = jax.image.resize(x, (*z.shape[:-1], x.shape[-1]), method="bilinear")
+            x = jax.image.resize(x, (*z.shape[:-1], x.shape[-1]), method="bilinear", precision=jax.lax.Precision.HIGHEST)
             # Match lateral's channels with desired number of channels
             z = id_conv(z)
             # Sum
@@ -360,7 +368,7 @@ class ResNetAutoEncoder(nnx.Module):
             x = self.backboneencoder.activation(x)
         # Final convolution to get desired number of output channels
         x = self.final_conv(x)
-        x = jax.image.resize(x, (x.shape[0], 224, 224, x.shape[-1]), method="bilinear") # TODO: hardcoded output size
+        x = jax.image.resize(x, (x.shape[0], 224, 224, x.shape[-1]), method="bilinear", precision=jax.lax.Precision.HIGHEST)
         return x
 
 # LeNet-5 for 36X60 images + 3 auxiliary features
