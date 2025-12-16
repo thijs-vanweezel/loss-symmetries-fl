@@ -337,7 +337,7 @@ class ResNetAutoEncoder(nnx.Module):
             ))
         self.final_conv = AsymConv(
             128,
-            1,
+            20,
             (3,3),
             keys[-2],
             param_dtype=jnp.bfloat16,
