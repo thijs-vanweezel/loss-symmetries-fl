@@ -43,6 +43,17 @@ def return_ce(omega):
 err_fn = lambda m,y,*xs: 1-(m(*xs,train=False).argmax(-1)==y.argmax(-1)).mean()
 top_5_err = lambda m,y,*xs: 1 - jnp.any(y.argmax(-1, keepdims=True) == jnp.argsort(m(*xs,train=False), axis=-1)[:,-5:], axis=-1).mean()
 
+def mean_iou(model, y, x, n_classes=20):
+    preds = model(x, train=False).argmax(-1)
+    y = y.argmax(-1)
+    miou = 0.
+    for cl in range(n_classes):
+        union = jnp.logical_or(preds == cl, y == cl).sum()
+        if union>=1:
+            intersection = jnp.logical_and(preds == cl, y == cl).sum()
+            miou += intersection / union
+    return miou / n_classes
+
 # Client drift in function space, by comparing logits to avg logits
 def functional_drift(models, ds_test):
     vcall = nnx.vmap(lambda model, *batch: model(*batch, train=False))
