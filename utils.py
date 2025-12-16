@@ -44,17 +44,16 @@ err_fn = lambda m,y,*xs: 1-(m(*xs,train=False).argmax(-1)==y.argmax(-1)).mean()
 top_5_err = lambda m,y,*xs: 1 - jnp.any(y.argmax(-1, keepdims=True) == jnp.argsort(m(*xs,train=False), axis=-1)[:,-5:], axis=-1).mean()
 
 # Intersection over union for all segmented classes, specific to Cityscapes
-def mean_iou(model, y, x):
+def mean_iou(model, y, *xs):
     n_classes = 20
-    preds = model(x, train=False).argmax(-1)
-    y = y.argmax(-1)
-    miou = 0.
-    for cl in range(n_classes):
-        union = jnp.logical_or(preds == cl, y == cl).sum()
-        if union>=1:
-            intersection = jnp.logical_and(preds == cl, y == cl).sum()
-            miou += intersection / union
-    return miou / n_classes
+    preds = model(*xs, train=False).argmax(-1).reshape(-1)
+    y = y.argmax(-1).reshape(-1)
+    conf_mat = jnp.bincount(y*n_classes+preds, length=n_classes**2)
+    conf_mat = conf_mat.reshape(n_classes, n_classes)[1:, 1:]
+    intersection = jnp.diag(conf_mat)
+    union = conf_mat.sum(0) + conf_mat.sum(1) - intersection
+    iou = intersection / union
+    return jnp.nanmean(iou)
 
 # Client drift in function space, by comparing logits to avg logits
 def functional_drift(models, ds_test):
