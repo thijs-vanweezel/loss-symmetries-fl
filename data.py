@@ -124,6 +124,9 @@ class CityScapes(Dataset):
             self.data[c].sort(key=lambda x: hashlib.sha256(str(x).encode()).hexdigest())
         # Misc attributes
         self.n_clients = n_clients
+        # Limited labels extracted from https://github.com/mcordts/cityscapesScripts/blob/master/cityscapesscripts/helpers/labels.py#L62
+        # using `i=0; torch.tensor([0 if l.ignoreInEval else (i:=i+1) for l in labels])`
+        self.conversion = torch.tensor([0,0,0,0,0,0,0,1,2,0,0,3,4,5,0,0,0,6,0,7,8,9,10,11,12,13,14,15,16,0,0,17,18,19,0])
 
     def __len__(self):
         # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
@@ -141,10 +144,13 @@ class CityScapes(Dataset):
         img = torch.permute(img, (1,2,0))
         # Load label image
         labelpath = filepath.replace("leftImg8bit", "gtFine").replace(".png", "_labelIds.png")
-        label = torchvision.io.decode_image(labelpath).long()
-        label = torchvision.transforms.Resize(256, interpolation=torchvision.transforms.InterpolationMode.NEAREST)(label)
-        label = torchvision.transforms.CenterCrop(224)(label)
-        label = torch.permute(label, (1,2,0))
+        indices = torchvision.io.decode_image(labelpath).long()
+        indices = torchvision.transforms.Resize(256, interpolation=torchvision.transforms.InterpolationMode.NEAREST)(indices)
+        indices = torchvision.transforms.CenterCrop(224)(indices)
+        indices = indices.permute(1,2,0)
+        indices = self.conversion[indices]
+        label = torch.zeros((*indices.shape[:-1], 20), dtype=torch.float32)
+        label = label.scatter(-1, indices, 1.)
         return label, img
 
 def gaze_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
