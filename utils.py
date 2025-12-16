@@ -31,11 +31,11 @@ def angle_err(model, y, *xs):
     rads = jnp.arccos(optax.losses.cosine_similarity(pred_vec, y_vec, axis=0))
     return jnp.nanmean(jnp.rad2deg(rads))
 
-# Classification loss including softmax layer
+# Classification loss including softmax layer over last dimension
 def return_ce(omega):
     def ell(model, model_g, y, *xs):
         prox = sum(jax.tree.map(lambda a, b: jnp.sum((a-b)**2), jax.tree.leaves(nnx.to_tree(model)), jax.tree.leaves(nnx.to_tree(model_g))))
-        ce = optax.softmax_cross_entropy(model(*xs, train=True), y).mean()
+        ce = optax.softmax_cross_entropy(model(*xs, train=True), y, axis=-1).mean()
         return omega/2*prox + ce
     return ell
 
@@ -43,7 +43,9 @@ def return_ce(omega):
 err_fn = lambda m,y,*xs: 1-(m(*xs,train=False).argmax(-1)==y.argmax(-1)).mean()
 top_5_err = lambda m,y,*xs: 1 - jnp.any(y.argmax(-1, keepdims=True) == jnp.argsort(m(*xs,train=False), axis=-1)[:,-5:], axis=-1).mean()
 
-def mean_iou(model, y, x, n_classes=20):
+# Intersection over union for all segmented classes, specific to Cityscapes
+def mean_iou(model, y, x):
+    n_classes = 20
     preds = model(x, train=False).argmax(-1)
     y = y.argmax(-1)
     miou = 0.
