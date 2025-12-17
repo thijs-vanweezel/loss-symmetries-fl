@@ -108,23 +108,23 @@ class CityScapes(Dataset):
         g = os.walk(os.path.join(path, "leftImg8bit", partition))
         # Get location names
         cities = next(g)[1]
-        # Dedicate a client to each class
+        # Dedicate a client to each city
         k, m = divmod(len(cities), n_clients)
-        class_splits = {cities[idx]: client for client in range(n_clients) for idx in range(client*k+min(client,m), (client+1)*k+min(client+1,m))}
+        city_splits = {cities[idx]: client for client in range(n_clients) for idx in range(client*k+min(client,m), (client+1)*k+min(client+1,m))}
         # Assign sample paths to each client
         self.data = {client: [] for client in range(n_clients)}
         for dirname, _, filelist in g:
             # Assign to client
             cityname = os.path.basename(dirname)
-            client = class_splits[cityname]
+            client = city_splits[cityname]
             filelist = [os.path.join(dirname, filename) for filename in filelist]
             self.data[client].extend(filelist)
-        # Shuffle so that samples are not ordered by class (note: deterministic)
+        # Shuffle so that samples are not ordered by city (note: deterministic)
         for c in range(n_clients):
             self.data[c].sort(key=lambda x: hashlib.sha256(str(x).encode()).hexdigest())
         # Misc attributes
         self.n_clients = n_clients
-        # Limited labels extracted from https://github.com/mcordts/cityscapesScripts/blob/master/cityscapesscripts/helpers/labels.py#L62
+        # Label mapping extracted from https://github.com/mcordts/cityscapesScripts/blob/master/cityscapesscripts/helpers/labels.py#L62
         # using `i=0; torch.tensor([0 if l.ignoreInEval else (i:=i+1) for l in labels])`
         self.conversion = torch.tensor([0,0,0,0,0,0,0,1,2,0,0,3,4,5,0,0,0,6,0,7,8,9,10,11,12,13,14,15,16,0,0,17,18,19,0])
 
@@ -145,11 +145,10 @@ class CityScapes(Dataset):
         # Load label image
         labelpath = filepath.replace("leftImg8bit", "gtFine").replace(".png", "_labelIds.png")
         indices = torchvision.io.decode_image(labelpath).long()
+        indices = self.conversion[indices]
         indices = torchvision.transforms.Resize(256, interpolation=torchvision.transforms.InterpolationMode.NEAREST)(indices)
         indices = torchvision.transforms.CenterCrop(224)(indices)
-        indices = indices.permute(1,2,0)
-        indices = self.conversion[indices]
-        label = torch.zeros((*indices.shape[:-1], 20), dtype=torch.float32)
+        label = torch.zeros((*indices.shape[1:], 20), dtype=torch.float32)
         label = label.scatter(-1, indices, 1.)
         return label, img
 
@@ -227,7 +226,7 @@ def imagenet_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jn
 
     return jnp.stack(clients_labels, 0), jnp.stack(clients_imgs, 0)
 
-def get_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, dataset=0, partition="train", n_classes=1000, **kwargs)->DataLoader:
+def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, dataset:int=0, partition:str="train", n_classes=1000, **kwargs)->DataLoader:
     assert beta>=0 and beta<=1, "Beta must be between 0 and 1"
     beta = 1-beta if skew=="overlap" else beta
     # Fractions derived
