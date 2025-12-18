@@ -147,9 +147,9 @@ class CityScapes(Dataset):
         indices = torchvision.io.decode_image(labelpath).long()
         indices = self.conversion[indices]
         indices = torchvision.transforms.Resize(256, interpolation=torchvision.transforms.InterpolationMode.NEAREST)(indices)
-        indices = torchvision.transforms.CenterCrop(224)(indices)
-        label = torch.zeros((*indices.shape[1:], 20), dtype=torch.float32)
-        label = label.scatter(-1, indices, 1.)
+        indices = torchvision.transforms.CenterCrop(224)(indices).squeeze()
+        label = torch.zeros((*indices.shape, 20), dtype=torch.float32)
+        label = label.scatter(-1, indices.unsqueeze(-1), 1.)
         return label, img
 
 def gaze_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
