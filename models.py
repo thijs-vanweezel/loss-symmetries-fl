@@ -383,11 +383,11 @@ class LeNet(nnx.Module):
         self.dimexp = dimexp
         # Layers
         keys = jax.random.split(key, 5)
-        self.conv1 = AsymConv(channels_in, 8, (4,4), keys[0], wasym, kappa, sigma, orderbias, normweights, lorafrac, padding="VALID", param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
-        self.conv2 = AsymConv(8, 16, (4,4), keys[1], wasym, kappa, sigma, orderbias, normweights, lorafrac, padding="VALID", param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
-        self.fc1 = AsymLinear(flat_shape*16+3, 128, keys[2], wasym, kappa, sigma, orderbias, normweights, lorafrac, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
-        self.fc2 = AsymLinear(128, 64, keys[3], wasym, kappa, sigma, orderbias, normweights, lorafrac, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
-        self.fc3 = AsymLinear(64, dim_out, keys[4], wasym, kappa, sigma, orderbias, normweights=False, lorafrac=lorafrac, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
+        self.conv1 = AsymConv(channels_in, 8, (4,4), keys[0], wasym, kappa, sigma, orderbias, normweights, lorafrac, padding="VALID")
+        self.conv2 = AsymConv(8, 16, (4,4), keys[1], wasym, kappa, sigma, orderbias, normweights, lorafrac, padding="VALID")
+        self.fc1 = AsymLinear(flat_shape*16+3, 128, keys[2], wasym, kappa, sigma, orderbias, normweights, lorafrac)
+        self.fc2 = AsymLinear(128, 64, keys[3], wasym, kappa, sigma, orderbias, normweights, lorafrac)
+        self.fc3 = AsymLinear(64, dim_out, keys[4], wasym, kappa, sigma, orderbias, normweights=False, lorafrac=lorafrac)
     
     def __call__(self, x, z, train=None):
         # Apply dimension expansion if desired
