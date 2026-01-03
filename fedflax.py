@@ -85,7 +85,7 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
     val_losses = []
     r = 0
     patience = 1
-    while (r!=rounds) if isinstance(rounds, int) else (patience<=max_patience):
+    while (r!=rounds) if rounds!="early" else (patience<=max_patience):
         # Parallelize global model and optimizers
         models = cast(model_g, n_clients)
         opts = nnx.vmap(opt_create)(models)
@@ -94,7 +94,7 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
         local_val_losses = []
         local_patience = 1
         epoch = 0
-        while (epoch!=local_epochs) if isinstance(local_epochs, int) else (local_patience<=max_patience):
+        while (epoch!=local_epochs) if local_epochs!="early" else (local_patience<=max_patience):
             # Collect and save params for visualization
             if filename: save(models, filename, n_clients, overwrite=(r==0 and epoch==0))
             # Iterate over batches
@@ -105,9 +105,9 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
                 # Train step
                 loss = train_step(models, model_g, opts, y, *xs)
                 # Inform user
-                bar.set_description(f"Round {r}/{rounds}, epoch {epoch}/{local_epochs} (local validation score: {'N/A' if epoch==0 or isinstance(local_epochs, int) else val}, local batch loss: {loss.mean():.4f})")
+                bar.set_description(f"Round {r}/{rounds}, epoch {epoch}/{local_epochs} (local validation score: {'N/A' if epoch==0 or local_epochs!='early' else val}, local batch loss: {loss.mean():.4f})")
             # Evaluate on local validation
-            if not isinstance(local_epochs, int):
+            if local_epochs=="early":
                 val = reduce(lambda a, batch: a+local_val_fn(models, *batch).mean(), ds_val, 0.)
                 val /= len(ds_val)
                 local_val_losses.append(val)
@@ -115,10 +115,14 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
                 if epoch>=1 and val>=local_val_losses[-local_patience-1]:
                     local_patience += 1
                 else:
-                    local_patience = 1
+                    # ... otherwise continue training and save best model
+                    patience = 1
+                    save_model(models, tmp_file)
             epoch += 1
         
         # Aggregate
+        if local_epochs=="early":
+            models = load_model(lambda: models, tmp_file)
         updates = get_updates(model_g, models)
         model_g = aggregate(model_g, updates)
         
@@ -149,7 +153,7 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
     if filename: save(cast(model_g, n_clients), filename, n_clients, overwrite=False)
 
     # Return the final local models, i.e., before aggregation
-    if isinstance(rounds, str):
+    if rounds=="early":
         models = load_model(lambda: models, tmp_file)
         os.remove(tmp_file)
     return models, r-patience-1
