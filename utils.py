@@ -65,7 +65,7 @@ def functional_drift(models, ds_test):
     return drift
 
 def save_model(model, filename):
-    _struct, state = nnx.split(model, ...)
+    state = nnx.state(model, ...)
     pickle.dump(state, open(filename, "wb"))
 
 def load_model(return_model, filename, **kwargs):
