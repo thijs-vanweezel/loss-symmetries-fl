@@ -13,6 +13,10 @@ def interleave(img, fill_value=.5):
     img = img.at[:, ::2].set(fill_value)
     return img
 
+class NonTrainable(nnx.Variable):
+    """Necessary for filtering and abstract evaluation."""
+    pass
+
 # Creates mask with the maximum number of non-zero weights while ensuring that each row is unique
 # https://github.com/cptq/asymmetric-networks/blob/main/lmc/models/models_mlp.py#L224
 def mask_linear_densest(in_dim, out_dim, **kwargs):
@@ -48,12 +52,12 @@ class AsymLinear(nnx.Linear):
         self.normweights = normweights
         self.lora = bool(lorafrac)
         # Create asymmetry params
-        if wasym=="densest": self.wmask = mask_linear_densest(*self.kernel.shape, dtype=self.param_dtype)
-        elif wasym=="random": self.wmask = mask_linear_random(*self.kernel.shape, key=keys[1], exp=1/3, dtype=self.param_dtype)
-        if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
-        if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
+        if wasym=="densest": self.wmask = NonTrainable(mask_linear_densest(*self.kernel.shape, dtype=self.param_dtype))
+        elif wasym=="random": self.wmask = NonTrainable(mask_linear_random(*self.kernel.shape, key=keys[1], exp=1/3, dtype=self.param_dtype))
+        if sigma>0. or self.wasym: self.randk = NonTrainable(jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype))
+        if sigma>0.: self.randb = NonTrainable(jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype))
         if self.lora:
-            self.kernel = self.kernel.value
+            self.kernel = NonTrainable(self.kernel.value)
             loradim = max(1, int(lorafrac*(in_features+out_features)/2))
             shapeA = (loradim, out_features)
             shapeB = (in_features, loradim)
@@ -140,12 +144,12 @@ class AsymConv(nnx.Conv):
         self.lora = bool(lorafrac)
         self.maybe_broadcast = lambda x: (x,) * len(self.kernel_size) if isinstance(x, int) else tuple(x)
         # Create asymmetry params
-        if wasym=="densest": self.wmask = mask_conv_densest(*self.kernel.shape[1:], dtype=self.param_dtype)
-        elif wasym=="random": self.wmask = mask_conv_random(*self.kernel.shape[1:], key=keys[1], exp=1/3, dtype=self.param_dtype)
-        if sigma>0. or self.wasym: self.randk = jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype)
-        if sigma>0.: self.randb = jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype)
+        if wasym=="densest": self.wmask = NonTrainable(mask_conv_densest(*self.kernel.shape[1:], dtype=self.param_dtype))
+        elif wasym=="random": self.wmask = NonTrainable(mask_conv_random(*self.kernel.shape[1:], key=keys[1], exp=1/3, dtype=self.param_dtype))
+        if sigma>0. or self.wasym: self.randk = NonTrainable(jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype))
+        if sigma>0.: self.randb = NonTrainable(jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype))
         if self.lora:
-            self.kernel = self.kernel.value
+            self.kernel = NonTrainable(self.kernel.value)
             loradim = max(1, int(lorafrac*(in_features+out_features)/2))
             shapeA = (*self.maybe_broadcast(kernel_size), loradim, out_features)
             shapeB = (*self.maybe_broadcast(kernel_size), in_features, loradim)
