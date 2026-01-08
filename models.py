@@ -147,7 +147,7 @@ class AsymConv(nnx.Conv):
         if wasym=="densest": self.wmask = NonTrainable(mask_conv_densest(*self.kernel.shape[1:], dtype=self.param_dtype))
         elif wasym=="random": self.wmask = NonTrainable(mask_conv_random(*self.kernel.shape[1:], key=keys[1], exp=1/3, dtype=self.param_dtype))
         if sigma>0. or self.wasym: self.randk = NonTrainable(jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype))
-        if sigma>0.: self.randb = NonTrainable(jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype))
+        if sigma>0. and self.use_bias: self.randb = NonTrainable(jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype))
         if self.lora:
             self.kernel = NonTrainable(self.kernel.value)
             loradim = max(1, int(lorafrac*(in_features+out_features)/2))
@@ -164,7 +164,7 @@ class AsymConv(nnx.Conv):
             kernel = kernel + self.matB @ self.matA
         # Apply SyRe (before wasym to avoid biasing the masked weights)
         if self.ssigma>0.:
-            bias = bias + self.randb * self.ssigma
+            if self.use_bias: bias = bias + self.randb * self.ssigma
             kernel = kernel + self.randk * self.ssigma
         # Order bias to counter permutation symmetry
         if self.orderbias: bias = jnp.concatenate([
@@ -178,7 +178,7 @@ class AsymConv(nnx.Conv):
         if self.normweights:
             norm = jnp.linalg.norm(kernel.reshape(-1, self.out_features), axis=0, keepdims=True)
             kernel /= norm
-            bias /= norm.squeeze()
+            if self.use_bias: bias /= norm.squeeze()
         # Implementation directly copied from nnx.Conv
         inputs, kernel, bias = self.promote_dtype(
             (inputs, kernel, bias), dtype=self.dtype
@@ -215,7 +215,7 @@ class ResNetBlock(nnx.Module):
             wasym,
             kappa,
             sigma,
-            False, # no order bias due to subsequent BN
+            False, # no bias due to subsequent BN
             normweights,
             lorafrac,
             strides=(stride,stride),
