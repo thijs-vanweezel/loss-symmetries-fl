@@ -75,12 +75,13 @@ class ImageNet(Dataset):
             if classname in classes:
                 # Assign to client
                 client = class_splits[classname]
-                filelist = [(label_idx, os.path.join(dirname, filename)) for filename in filelist]
-                self.data[client].extend(filelist)
+                # Insert at interleaved indices so that samples are not ordered by class (note: deterministic)
+                for i, file in enumerate(filelist):
+                    self.data[client].insert(
+                        i*(label_idx-n_classes//n_clients*client), 
+                        (label_idx, os.path.join(dirname, file))
+                    )
                 label_idx += 1
-        # Shuffle so that samples are not ordered by class (note: deterministic)
-        for c in range(n_clients):
-            self.data[c].sort(key=lambda x: hashlib.sha256(str(x).encode()).hexdigest())
         # Misc attributes
         self.n_clients = n_clients
         self.n_classes = n_classes
