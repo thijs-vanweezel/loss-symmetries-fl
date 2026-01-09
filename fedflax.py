@@ -116,7 +116,7 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
                     local_patience += 1
                 else:
                     # ... otherwise continue training and save best model
-                    patience = 1
+                    local_patience = 1
                     save_model(models, tmp_file)
             epoch += 1
         
