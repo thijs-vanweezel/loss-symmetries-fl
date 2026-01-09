@@ -244,6 +244,7 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
         assert skew in ["overlap", "label"], "Skew must be either 'overlap' or 'label'. For no skew, specify beta=0."
         collate = partial(imagenet_collate, n_clients=n_clients, indiv_frac=indiv_frac, skew=skew)
     else:
+        assert n_clients<=3, "CityScapes supports a maximum of 3 clients."
         dataset = CityScapes(path="cityscapes/", partition=partition, n_clients=n_clients)
         assert skew in ["overlap", "feature"], "Skew must be either 'overlap' or 'feature'. For no skew, specify beta=0."
         skew = "label" if skew=="feature" else "overlap" # functional implementation (i.e., interleaving) is equivalent
