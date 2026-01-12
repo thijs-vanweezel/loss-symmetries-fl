@@ -78,3 +78,10 @@ def load_model(return_model, filename, **kwargs):
     state = pickle.load(open(filename, "rb"))
     model = nnx.merge(struct, state)
     return model
+
+def nnx_norm(state1:nnx.State, state2:nnx.State|float=0., order:float=2., n_clients:int=1):
+    """Compute norm between two pytrees. When `n_clients>1`, accounts for a client dimension."""
+    if isinstance(state2, (int, float)): squares = jax.tree.map(lambda pl: jnp.abs(state2 - pl)**order, state1)
+    else: squares = jax.tree.map(lambda pl, pg: jnp.abs(pg - pl)**order, state1, state2)
+    sumofsquares = jax.tree.reduce(lambda acc, d: acc+jnp.sum(d.reshape(n_clients,-1), -1), squares, jnp.zeros(n_clients))
+    return jnp.power(sumofsquares, 1/order).squeeze()
