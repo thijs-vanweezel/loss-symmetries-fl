@@ -28,19 +28,12 @@ def mask_linear_densest(in_dim, out_dim, **kwargs):
             row_idx += 1
             if row_idx >= out_dim:
                 return mask
-def mask_linear_random(in_dim, out_dim, exp, key, **kwargs):
-    mask = jnp.ones((in_dim, out_dim), **kwargs)
-    nfix = max(1, int(in_dim**exp))
-    for row_idx, key in zip(range(out_dim), jax.random.split(key, out_dim)):
-        zeros_in_row = jax.random.permutation(key, jnp.arange(in_dim))[:nfix]
-        mask = mask.at[zeros_in_row, row_idx].set(0)
-    return mask
 
 # W-Asymmetry implementation consistent with https://github.com/cptq/asymmetric-networks/blob/main/lmc/models/models_mlp.py#L169 # TODO: is it strange that updates for masked weights are not zero?
 # SyRe implementation consistent with https://github.com/xu-yz19/syre/blob/main/MLP.ipynb
 # And kernel normalization consistent with https://github.com/o-laurent/bayes_posterior_symmetry_exploration/blob/main/symmetries/scale_resnet.py#L166
 class AsymLinear(nnx.Linear):
-    def __init__(self, in_features:int, out_features:int, key:jax.dtypes.prng_key, wasym:str|None=None, 
+    def __init__(self, in_features:int, out_features:int, key:jax.dtypes.prng_key, wasym:bool=False, 
                  kappa:float=1., sigma:float=0., orderbias:bool=False, normweights:bool=False, **kwargs):
         keys = jax.random.split(key, 4)
         super().__init__(in_features, out_features, rngs=nnx.Rngs(keys[0]), use_bias=True, **kwargs)
@@ -51,8 +44,7 @@ class AsymLinear(nnx.Linear):
         self.orderbias = orderbias
         self.normweights = normweights
         # Create asymmetry params
-        if wasym=="densest": self.wmask = NonTrainable(mask_linear_densest(*self.kernel.shape, dtype=self.param_dtype))
-        elif wasym=="random": self.wmask = NonTrainable(mask_linear_random(*self.kernel.shape, key=keys[1], exp=1/3, dtype=self.param_dtype))
+        if self.wasym: self.wmask = NonTrainable(mask_linear_densest(*self.kernel.shape, dtype=self.param_dtype))
         if sigma>0. or self.wasym: self.randk = NonTrainable(jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype))
         if sigma>0.: self.randb = NonTrainable(jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype))
 
@@ -105,21 +97,11 @@ def mask_conv_densest(kernel_size, in_channels, out_channels, **kwargs):
                 return mask
             mask = mask.at[tuple(cols_idx) + (out_channel_idx,)].set(0)
             out_channel_idx += 1
-def mask_conv_random(kernel_size, in_channels, out_channels, key, exp:float, **kwargs):
-    mask = jnp.ones((kernel_size, kernel_size, in_channels, out_channels), **kwargs)
-    weights_per_out_channel = in_channels * kernel_size**2
-    nfix = max(1, int(weights_per_out_channel**exp)) 
-    flat_idx_to_3d_idx = jax.vmap(lambda idx : [idx%kernel_size, (idx//kernel_size)%kernel_size, idx//kernel_size**2])
-    for out_channel_idx, key in zip(range(out_channels), jax.random.split(key, out_channels)):
-        flat_col_idxs = jax.random.permutation(key, jnp.arange(weights_per_out_channel))[:nfix]
-        col_idxs = flat_idx_to_3d_idx(flat_col_idxs)
-        mask = mask.at[tuple(col_idxs) + (out_channel_idx,)].set(0)
-    return mask
 
 # W-Asymmetry implementation consistent with https://github.com/cptq/asymmetric-networks/blob/main/lmc/models/models_resnet.py#L22
 # And kernel normalization consistent with https://github.com/o-laurent/bayes_posterior_symmetry_exploration/blob/main/symmetries/scale_resnet.py#L166
 class AsymConv(nnx.Conv):
-    def __init__(self, in_features:int, out_features:int, kernel_size:tuple[int,...], key:jax.dtypes.prng_key, wasym:str|None=None, 
+    def __init__(self, in_features:int, out_features:int, kernel_size:tuple[int,...], key:jax.dtypes.prng_key, wasym:bool=False, 
                  kappa:float=1., sigma:float=0., orderbias:bool=False, normweights:bool=False, **kwargs):
         keys = jax.random.split(key, 4)
         super().__init__(in_features, out_features, kernel_size, rngs=nnx.Rngs(keys[0]), **kwargs)
@@ -132,8 +114,7 @@ class AsymConv(nnx.Conv):
         self.normweights = normweights
         self.maybe_broadcast = lambda x: (x,) * len(self.kernel_size) if isinstance(x, int) else tuple(x)
         # Create asymmetry params
-        if wasym=="densest": self.wmask = NonTrainable(mask_conv_densest(*self.kernel.shape[1:], dtype=self.param_dtype))
-        elif wasym=="random": self.wmask = NonTrainable(mask_conv_random(*self.kernel.shape[1:], key=keys[1], exp=1/3, dtype=self.param_dtype))
+        if self.wasym: self.wmask = NonTrainable(mask_conv_densest(*self.kernel.shape[1:], dtype=self.param_dtype))
         if sigma>0. or self.wasym: self.randk = NonTrainable(jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype))
         if sigma>0. and self.use_bias: self.randb = NonTrainable(jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype))
 
@@ -249,7 +230,7 @@ class ResNetBlock(nnx.Module):
 # Resnet for ImageNet ([3,4,6,3] for 34 layers, [2,2,2,2] for 18 layers)
 class ResNet(nnx.Module):
     def __init__(self, key=jax.random.key(0), layers:tuple[int,...]=[2,2,2,2], kernels:tuple[int,...]=[64,128,256,512], 
-                 channels_in:int=3, dim_out:int=1000, dimexp:bool=False, wasym:str|None=None, kappa:float=1., sigma:float=0., 
+                 channels_in:int=3, dim_out:int=1000, dimexp:bool=False, wasym:bool=False, kappa:float=1., sigma:float=0., 
                  activation=nnx.relu, orderbias:bool=False, normweights:bool=False, **kwargs):
         assert len(layers)==len(kernels)
         # Set some params
@@ -352,7 +333,7 @@ class ResNetAutoEncoder(nnx.Module):
 
 # LeNet-5 for 36X60 images + 3 auxiliary features
 class LeNet(nnx.Module):
-    def __init__(self, key=jax.random.key(0), dimexp=False, wasym=None, kappa=1., dim_out=2, sigma=0., 
+    def __init__(self, key=jax.random.key(0), dimexp=False, wasym=False, kappa=1., dim_out=2, sigma=0., 
                  activation=nnx.relu, orderbias=False, channels_in=1, normweights=False):
         # Some params
         super().__init__()
