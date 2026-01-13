@@ -166,7 +166,8 @@ def gaze_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray,
     imgs = jnp.stack([jnp.asarray(img, dtype=jnp.float32) for img in imgs])
     labels = jnp.stack([jnp.asarray(label, dtype=jnp.float32) for label in labels])
 
-    # Feature skew, by sharing a portion of skewed samples while retaining another portion of client-side samples
+    # Feature skew, by drawing a portion of the samples from the same feature distribution
+    # Feature groups are interleaved by the Dataset
     if skew=="feature":
         same_dist_idxs = [range(c*int((1-beta)*len(imgs)/n_clients), (c+1)*int((1-beta)*len(imgs)/n_clients)) for c in range(n_clients)]
         diff_dist_idxs = [range(int((1-beta)*len(imgs))+c, len(imgs), n_clients) for c in range(n_clients)]
@@ -177,13 +178,14 @@ def gaze_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray,
     
     # Overlap reduction, by sharing a portion of the total samples while retaining another portion of the total samples
     elif skew=="overlap":
-        n_indiv = int(indiv_frac*len(imgs))
-        clients_idxs = [jnp.asarray(list(range(i*n_indiv, (i+1)*n_indiv)) + list(range(n_clients*n_indiv, len(imgs)))) for i in range(n_clients)]
-        clients_auxs = [auxs[idxs] for idxs in clients_idxs]
-        clients_imgs = [imgs[idxs] for idxs in clients_idxs]
-        clients_labels = [labels[idxs] for idxs in clients_idxs]
+        n_indiv = int(beta/(beta+(1-beta)*n_clients) * len(imgs))
+        diff_dist_idxs = [range(c*n_indiv, (c+1)*n_indiv) for c in range(n_clients)]
+        idxs = [jnp.asarray(list(diff_dist_idxs[c]) + list(range(n_clients*n_indiv, len(imgs)))) for c in range(n_clients)]
+        clients_auxs = [auxs[idx] for idx in idxs]
+        clients_imgs = [imgs[idx] for idx in idxs]
+        clients_labels = [labels[idx] for idx in idxs]
 
-    # Label skew, by evenly dividing the samples into n directional groups, and then sharing a portion of the total samples
+    # Label skew, by evenly dividing the samples into n directional groups, and then drawing from the same group
     # Assumes there is no order to the labels' values
     elif skew=="label":
         # Rank the non-shared samples by quadrant angle
@@ -232,8 +234,10 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
     assert beta>=0 and beta<=1, "Beta must be between 0 and 1"
     beta = 1-beta if skew=="overlap" else beta
     # Increase batch size and account for floor division
-    new_batch_size = batch_size*n_clients
-    new_beta = round(beta * new_batch_size / n_clients) * n_clients / new_batch_size
+    if skew=="overlap": new_batch_size = int(batch_size*beta + batch_size*(1-beta)*n_clients)
+    else: 
+        new_batch_size = batch_size*n_clients
+        new_beta = round(beta * new_batch_size / n_clients) * n_clients / new_batch_size
     # Dataset type
     if dataset==0:
         dataset = MPIIGaze(n_clients=n_clients, path=os.path.join("MPIIGaze_preprocessed", partition))
