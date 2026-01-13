@@ -153,7 +153,7 @@ class CityScapes(Dataset):
         label = label.scatter(-1, indices.unsqueeze(-1), 1.)
         return label, img
 
-def gaze_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+def jax_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
     Only one type of skew can be applied at a time, with the following options:
     - "feature": where indiv_frac==1 corresponds to clients having disjoint (heterogeneous) data distributions.
@@ -161,10 +161,10 @@ def gaze_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray,
     - "label": where indiv_frac==1 corresponds to clients having disjoint label distributions.
     """
     # Collect, convert, and concat
-    labels, imgs, auxs = zip(*batch)
-    auxs = jnp.stack([jnp.asarray(aux, dtype=jnp.float32) for aux in auxs])
+    labels, imgs, *auxs = zip(*batch)
     imgs = jnp.stack([jnp.asarray(img, dtype=jnp.float32) for img in imgs])
     labels = jnp.stack([jnp.asarray(label, dtype=jnp.float32) for label in labels])
+    if gaze:=bool(auxs): auxs = jnp.stack([jnp.asarray(aux, dtype=jnp.float32) for aux in auxs[0]])
 
     # Feature skew, by drawing a portion of the samples from the same feature distribution
     # Feature groups are interleaved by the Dataset
@@ -172,22 +172,16 @@ def gaze_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray,
         same_dist_idxs = [range(c*int((1-beta)*len(imgs)/n_clients), (c+1)*int((1-beta)*len(imgs)/n_clients)) for c in range(n_clients)]
         diff_dist_idxs = [range(int((1-beta)*len(imgs))+c, len(imgs), n_clients) for c in range(n_clients)]
         idxs = [jnp.asarray(list(same_dist_idxs[c]) + list(diff_dist_idxs[c])) for c in range(n_clients)]
-        clients_auxs = [auxs[idx] for idx in idxs]
-        clients_imgs = [imgs[idx] for idx in idxs]
-        clients_labels = [labels[idx] for idx in idxs]
     
     # Overlap reduction, by sharing a portion of the total samples while retaining another portion of the total samples
     elif skew=="overlap":
         n_indiv = int(beta/(beta+(1-beta)*n_clients) * len(imgs))
         diff_dist_idxs = [range(c*n_indiv, (c+1)*n_indiv) for c in range(n_clients)]
         idxs = [jnp.asarray(list(diff_dist_idxs[c]) + list(range(n_clients*n_indiv, len(imgs)))) for c in range(n_clients)]
-        clients_auxs = [auxs[idx] for idx in idxs]
-        clients_imgs = [imgs[idx] for idx in idxs]
-        clients_labels = [labels[idx] for idx in idxs]
 
     # Label skew, by evenly dividing the samples into n directional groups, and then drawing from the same group
     # Assumes there is no order to the labels' values
-    elif skew=="label":
+    elif skew=="label" and gaze:
         # Rank the non-shared samples by quadrant angle
         num_homo = int((1-beta)*len(imgs))
         angles = (jnp.arctan2(*labels.T) + 2*jnp.pi) % (2*jnp.pi)
@@ -195,42 +189,23 @@ def gaze_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray,
         diff_dist_idxs = [sorter[c*num_homo//n_clients : (c+1)*num_homo//n_clients] for c in range(n_clients)]
         # Divide the remainder indifferently (i.e., simply splitting indices)
         same_dist_idxs = [range(num_homo+c*num_homo//n_clients, num_homo+(c+1)*num_homo//n_clients) for c in range(n_clients)]
-        # Select
+        # Consolidate
         idxs = [jnp.asarray(list(same_dist_idxs[c]) + list(diff_dist_idxs[c])) for c in range(n_clients)]
-        clients_auxs = [auxs[idx] for idx in idxs]
-        clients_imgs = [imgs[idx] for idx in idxs]
-        clients_labels = [labels[idx] for idx in idxs]
 
-    return jnp.stack(clients_labels, 0), jnp.stack(clients_imgs, 0), jnp.stack(clients_auxs, 0)
-
-def imagenet_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-    """
-    Only one type of skew can be applied at a time, with the following options:
-    - "overlap": where indiv_frac==0 corresponds to clients having disjoint samples of homogeneous distributions.
-    - "label": where indiv_frac==1 corresponds to clients having disjoint label distributions.
-    """
-    # Collect, convert, and concat
-    labels, imgs = zip(*batch)
-    imgs = jnp.stack([jnp.asarray(img, dtype=jnp.float32) for img in imgs])
-    labels = jnp.stack([jnp.asarray(label, dtype=jnp.float32) for label in labels])
-
-    # Label skew, by drawing a portion of the samples from the same distribution
-    if skew=="label":
+    elif skew=="label":
         same_dist_idxs = [range(c*int((1-beta)*len(imgs)/n_clients), (c+1)*int((1-beta)*len(imgs)/n_clients)) for c in range(n_clients)]
         diff_dist_idxs = [range(int((1-beta)*len(imgs))+c, len(imgs), n_clients) for c in range(n_clients)]
         idxs = [jnp.asarray(list(same_dist_idxs[c]) + list(diff_dist_idxs[c])) for c in range(n_clients)]
-        clients_imgs = [imgs[idx] for idx in idxs]
-        clients_labels = [labels[idx] for idx in idxs]
-    
-    # Overlap reduction, by sharing a portion of the total samples while retaining another portion of the total samples
-    elif skew=="overlap":
-        n_indiv = int(beta/(beta+(1-beta)*n_clients) * len(imgs))
-        diff_dist_idxs = [range(c*n_indiv, (c+1)*n_indiv) for c in range(n_clients)]
-        idxs = [jnp.asarray(list(diff_dist_idxs[c]) + list(range(n_clients*n_indiv, len(imgs)))) for c in range(n_clients)]
-        clients_imgs = [imgs[idx] for idx in idxs]
-        clients_labels = [labels[idx] for idx in idxs]
 
-    return jnp.stack(clients_labels, 0), jnp.stack(clients_imgs, 0)
+    # Select and return
+    clients_imgs = [imgs[idx] for idx in idxs]
+    clients_labels = [labels[idx] for idx in idxs]
+    if gaze: clients_auxs = [auxs[idx] for idx in idxs]
+
+    if gaze:
+        return jnp.stack(clients_labels, 0), jnp.stack(clients_imgs, 0), jnp.stack(clients_auxs, 0)
+    else:
+        return jnp.stack(clients_labels, 0), jnp.stack(clients_imgs, 0)
 
 def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, dataset:int=0, partition:str="train", n_classes=1000, **kwargs)->DataLoader:
     assert beta>=0 and beta<=1, "Beta must be between 0 and 1"
@@ -246,17 +221,15 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
     if dataset==0:
         dataset = MPIIGaze(n_clients=n_clients, path=os.path.join("MPIIGaze_preprocessed", partition))
         assert skew in ["feature", "overlap", "label"], "Skew must be one of 'feature', 'overlap', or 'label'. For no skew, specify beta=0."
-        collate = partial(gaze_collate, n_clients=n_clients, beta=new_beta, skew=skew)
     elif dataset==1:
         dataset = ImageNet(path=os.path.join("imagenet/Data/CLS-LOC", partition), n_clients=n_clients, n_classes=n_classes)
         assert skew in ["overlap", "label"], "Skew must be either 'overlap' or 'label'. For no skew, specify beta=0."
-        collate = partial(imagenet_collate, n_clients=n_clients, beta=new_beta, skew=skew)
     else:
         assert n_clients<=3, "CityScapes supports a maximum of 3 clients."
         dataset = CityScapes(path="cityscapes/", partition=partition, n_clients=n_clients)
         assert skew in ["overlap", "feature"], "Skew must be either 'overlap' or 'feature'. For no skew, specify beta=0."
         skew = "label" if skew=="feature" else "overlap" # functional implementation (i.e., interleaving) is equivalent
-        collate = partial(imagenet_collate, n_clients=n_clients, beta=new_beta, skew=skew)
+    collate = partial(jax_collate, n_clients=n_clients, beta=new_beta, skew=skew)
     # Iterable batches
     return DataLoader(
         dataset,
