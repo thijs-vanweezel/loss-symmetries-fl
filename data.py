@@ -203,7 +203,7 @@ def gaze_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray,
 
     return jnp.stack(clients_labels, 0), jnp.stack(clients_imgs, 0), jnp.stack(clients_auxs, 0)
 
-def imagenet_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+def imagenet_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
     Only one type of skew can be applied at a time, with the following options:
     - "overlap": where indiv_frac==0 corresponds to clients having disjoint samples of homogeneous distributions.
@@ -214,19 +214,21 @@ def imagenet_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jn
     imgs = jnp.stack([jnp.asarray(img, dtype=jnp.float32) for img in imgs])
     labels = jnp.stack([jnp.asarray(label, dtype=jnp.float32) for label in labels])
 
-    # Label skew, by sharing a portion of skewed samples while retaining another portion of client-side samples
+    # Label skew, by drawing a portion of the samples from the same distribution
     if skew=="label":
-        indiv_stop = int(indiv_frac*len(imgs)*n_clients)
-        clients_idxs = [jnp.asarray(list(range(i, indiv_stop, n_clients)) + list(range(indiv_stop, len(imgs)))) for i in range(n_clients)]
-        clients_imgs = [imgs[idxs] for idxs in clients_idxs]
-        clients_labels = [labels[idxs] for idxs in clients_idxs]
+        same_dist_idxs = [range(c*int((1-beta)*len(imgs)/n_clients), (c+1)*int((1-beta)*len(imgs)/n_clients)) for c in range(n_clients)]
+        diff_dist_idxs = [range(int((1-beta)*len(imgs))+c, len(imgs), n_clients) for c in range(n_clients)]
+        idxs = [jnp.asarray(list(same_dist_idxs[c]) + list(diff_dist_idxs[c])) for c in range(n_clients)]
+        clients_imgs = [imgs[idx] for idx in idxs]
+        clients_labels = [labels[idx] for idx in idxs]
     
     # Overlap reduction, by sharing a portion of the total samples while retaining another portion of the total samples
     elif skew=="overlap":
-        n_indiv = int(indiv_frac*len(imgs))
-        clients_idxs = [jnp.asarray(list(range(i*n_indiv, (i+1)*n_indiv)) + list(range(n_clients*n_indiv, len(imgs)))) for i in range(n_clients)]
-        clients_imgs = [imgs[idxs] for idxs in clients_idxs]
-        clients_labels = [labels[idxs] for idxs in clients_idxs]
+        n_indiv = int(beta/(beta+(1-beta)*n_clients) * len(imgs))
+        diff_dist_idxs = [range(c*n_indiv, (c+1)*n_indiv) for c in range(n_clients)]
+        idxs = [jnp.asarray(list(diff_dist_idxs[c]) + list(range(n_clients*n_indiv, len(imgs)))) for c in range(n_clients)]
+        clients_imgs = [imgs[idx] for idx in idxs]
+        clients_labels = [labels[idx] for idx in idxs]
 
     return jnp.stack(clients_labels, 0), jnp.stack(clients_imgs, 0)
 
@@ -234,7 +236,9 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
     assert beta>=0 and beta<=1, "Beta must be between 0 and 1"
     beta = 1-beta if skew=="overlap" else beta
     # Increase batch size and account for floor division
-    if skew=="overlap": new_batch_size = int(batch_size*beta + batch_size*(1-beta)*n_clients)
+    if skew=="overlap": 
+        new_batch_size = int(batch_size*beta + batch_size*(1-beta)*n_clients)
+        new_beta = beta
     else: 
         new_batch_size = batch_size*n_clients
         new_beta = round(beta * new_batch_size / n_clients) * n_clients / new_batch_size
@@ -246,13 +250,13 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
     elif dataset==1:
         dataset = ImageNet(path=os.path.join("imagenet/Data/CLS-LOC", partition), n_clients=n_clients, n_classes=n_classes)
         assert skew in ["overlap", "label"], "Skew must be either 'overlap' or 'label'. For no skew, specify beta=0."
-        collate = partial(imagenet_collate, n_clients=n_clients, indiv_frac=indiv_frac, skew=skew)
+        collate = partial(imagenet_collate, n_clients=n_clients, beta=new_beta, skew=skew)
     else:
         assert n_clients<=3, "CityScapes supports a maximum of 3 clients."
         dataset = CityScapes(path="cityscapes/", partition=partition, n_clients=n_clients)
         assert skew in ["overlap", "feature"], "Skew must be either 'overlap' or 'feature'. For no skew, specify beta=0."
         skew = "label" if skew=="feature" else "overlap" # functional implementation (i.e., interleaving) is equivalent
-        collate = partial(imagenet_collate, n_clients=n_clients, indiv_frac=indiv_frac, skew=skew)
+        collate = partial(imagenet_collate, n_clients=n_clients, beta=new_beta, skew=skew)
     # Iterable batches
     return DataLoader(
         dataset,
