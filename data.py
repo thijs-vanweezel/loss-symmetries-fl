@@ -187,17 +187,17 @@ def gaze_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray,
     # Assumes there is no order to the labels' values
     elif skew=="label":
         # Rank the non-shared samples by quadrant angle
-        indiv_stop = int(indiv_frac*len(imgs)*n_clients)
+        num_homo = int((1-beta)*len(imgs))
         angles = (jnp.arctan2(*labels.T) + 2*jnp.pi) % (2*jnp.pi)
-        sorted_idxs = jnp.argsort(angles[:indiv_stop])
-        # Divide into n_clients groups
-        group_size = indiv_stop//n_clients
-        indiv_idxs = [list(sorted_idxs[i*group_size:(i+1)*group_size]) for i in range(n_clients)]
-        shared_idxs = list(range(indiv_stop, len(imgs)))
+        sorter = jnp.argsort(angles[:num_homo])
+        diff_dist_idxs = [sorter[c*num_homo//n_clients : (c+1)*num_homo//n_clients] for c in range(n_clients)]
+        # Divide the remainder indifferently (i.e., simply splitting indices)
+        same_dist_idxs = [range(num_homo+c*num_homo//n_clients, num_homo+(c+1)*num_homo//n_clients) for c in range(n_clients)]
         # Select
-        clients_auxs = [auxs[jnp.asarray(idxs + shared_idxs)] for idxs in indiv_idxs]
-        clients_imgs = [imgs[jnp.asarray(idxs + shared_idxs)] for idxs in indiv_idxs]
-        clients_labels = [labels[jnp.asarray(idxs + shared_idxs)] for idxs in indiv_idxs]
+        idxs = [jnp.asarray(list(same_dist_idxs[c]) + list(diff_dist_idxs[c])) for c in range(n_clients)]
+        clients_auxs = [auxs[idx] for idx in idxs]
+        clients_imgs = [imgs[idx] for idx in idxs]
+        clients_labels = [labels[idx] for idx in idxs]
 
     return jnp.stack(clients_labels, 0), jnp.stack(clients_imgs, 0), jnp.stack(clients_auxs, 0)
 
