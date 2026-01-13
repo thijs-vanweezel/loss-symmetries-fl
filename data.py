@@ -49,7 +49,7 @@ class MPIIGaze(Dataset):
         i = idx//self.n_clients
         # Load
         img, aux, label = torch.load(self.files[client][i])
-        # # Flip if right eye
+        # Flip if right eye
         if self.files[client][i].endswith("right.pt"):
             img = torch.flip(img, [1])
             label[1] = -label[1]
@@ -153,7 +153,7 @@ class CityScapes(Dataset):
         label = label.scatter(-1, indices.unsqueeze(-1), 1.)
         return label, img
 
-def gaze_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+def gaze_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
     Only one type of skew can be applied at a time, with the following options:
     - "feature": where indiv_frac==1 corresponds to clients having disjoint (heterogeneous) data distributions.
@@ -168,11 +168,12 @@ def gaze_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jnp.nd
 
     # Feature skew, by sharing a portion of skewed samples while retaining another portion of client-side samples
     if skew=="feature":
-        indiv_stop = int(indiv_frac*len(imgs)*n_clients)
-        clients_idxs = [jnp.asarray(list(range(i, indiv_stop, n_clients)) + list(range(indiv_stop, len(imgs)))) for i in range(n_clients)]
-        clients_auxs = [auxs[idxs] for idxs in clients_idxs]
-        clients_imgs = [imgs[idxs] for idxs in clients_idxs]
-        clients_labels = [labels[idxs] for idxs in clients_idxs]
+        same_dist_idxs = [range(c*int((1-beta)*len(imgs)/n_clients), (c+1)*int((1-beta)*len(imgs)/n_clients)) for c in range(n_clients)]
+        diff_dist_idxs = [range(int((1-beta)*len(imgs))+c, len(imgs), n_clients) for c in range(n_clients)]
+        idxs = [jnp.asarray(list(same_dist_idxs[c]) + list(diff_dist_idxs[c])) for c in range(n_clients)]
+        clients_auxs = [auxs[idx] for idx in idxs]
+        clients_imgs = [imgs[idx] for idx in idxs]
+        clients_labels = [labels[idx] for idx in idxs]
     
     # Overlap reduction, by sharing a portion of the total samples while retaining another portion of the total samples
     elif skew=="overlap":
@@ -230,16 +231,14 @@ def imagenet_collate(batch, n_clients:int, indiv_frac:float, skew:str)->tuple[jn
 def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, dataset:int=0, partition:str="train", n_classes=1000, **kwargs)->DataLoader:
     assert beta>=0 and beta<=1, "Beta must be between 0 and 1"
     beta = 1-beta if skew=="overlap" else beta
-    # Fractions derived
-    n_indiv = int(batch_size*beta)
-    n_shared = batch_size-n_indiv 
-    new_batch_size = n_indiv*n_clients + n_shared
-    indiv_frac = n_indiv / new_batch_size
+    # Increase batch size and account for floor division
+    new_batch_size = batch_size*n_clients
+    new_beta = round(beta * new_batch_size / n_clients) * n_clients / new_batch_size
     # Dataset type
     if dataset==0:
         dataset = MPIIGaze(n_clients=n_clients, path=os.path.join("MPIIGaze_preprocessed", partition))
         assert skew in ["feature", "overlap", "label"], "Skew must be one of 'feature', 'overlap', or 'label'. For no skew, specify beta=0."
-        collate = partial(gaze_collate, n_clients=n_clients, indiv_frac=indiv_frac, skew=skew)
+        collate = partial(gaze_collate, n_clients=n_clients, beta=new_beta, skew=skew)
     elif dataset==1:
         dataset = ImageNet(path=os.path.join("imagenet/Data/CLS-LOC", partition), n_clients=n_clients, n_classes=n_classes)
         assert skew in ["overlap", "label"], "Skew must be either 'overlap' or 'label'. For no skew, specify beta=0."
