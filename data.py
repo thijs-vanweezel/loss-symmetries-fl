@@ -185,8 +185,8 @@ def jax_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray, 
         # Rank the non-shared samples by quadrant angle
         num_homo = int((1-beta)*len(imgs))
         angles = (jnp.arctan2(*labels.T) + 2*jnp.pi) % (2*jnp.pi)
-        sorter = jnp.argsort(angles[:num_homo])
-        diff_dist_idxs = [sorter[c*num_homo//n_clients : (c+1)*num_homo//n_clients] for c in range(n_clients)]
+        sorter = jnp.argsort(angles[:len(imgs)-num_homo])
+        diff_dist_idxs = [sorter[c*len(sorter)//n_clients : (c+1)*len(sorter)//n_clients] for c in range(n_clients)]
         # Divide the remainder indifferently (i.e., simply splitting indices)
         same_dist_idxs = [range(num_homo+c*num_homo//n_clients, num_homo+(c+1)*num_homo//n_clients) for c in range(n_clients)]
         # Consolidate
