@@ -175,7 +175,7 @@ def jax_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray, 
     
     # Overlap reduction, by sharing a portion of the total samples while retaining another portion of the total samples
     elif skew=="overlap":
-        n_indiv = int(beta/(beta+(1-beta)*n_clients) * len(imgs))
+        n_indiv = int(round(len(imgs)/(beta*n_clients + 1 - beta))*beta)
         diff_dist_idxs = [range(c*n_indiv, (c+1)*n_indiv) for c in range(n_clients)]
         idxs = [jnp.asarray(list(diff_dist_idxs[c]) + list(range(n_clients*n_indiv, len(imgs))), dtype=jnp.int32) for c in range(n_clients)]
 
@@ -204,11 +204,10 @@ def jax_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray, 
 
 def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, dataset:int=0, partition:str="train", n_classes=1000, **kwargs)->DataLoader:
     assert beta>=0 and beta<=1, "Beta must be between 0 and 1"
-    beta = 1-beta if skew=="overlap" else beta
     # Increase batch size and account for floor division
     if skew=="overlap": 
-        new_batch_size = int(batch_size*beta + batch_size*(1-beta)*n_clients)
-        new_beta = beta
+        new_beta = 1-beta
+        new_batch_size = int(batch_size*new_beta)*n_clients + batch_size - int(batch_size*new_beta)
     else: 
         new_batch_size = batch_size*n_clients
         new_beta = round(beta * new_batch_size / n_clients) * n_clients / new_batch_size
