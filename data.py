@@ -7,25 +7,22 @@ from functools import partial
 def preprocess(original_path="MPIIGaze/MPIIGaze/Data/Normalized", new_path="MPIIGaze_preprocessed2/"):
     """Run once."""
     # Split the MPIIGaze dataset into train/val/test sets.
-    shutil.copytree(original_path, "MPIIGaze_preprocessed2/", dirs_exist_ok=True)
-    for person in [p for p in os.listdir("MPIIGaze_preprocessed2/") if p.startswith("p")]:
-        os.makedirs(f"MPIIGaze_preprocessed2/train/{person}")
-        os.makedirs(f"MPIIGaze_preprocessed2/test/{person}")
-        os.makedirs(f"MPIIGaze_preprocessed2/val/{person}")
-        mats = filter(lambda x: x.endswith(".mat"), os.listdir(f"MPIIGaze_preprocessed2/{person}"))
+    shutil.copytree(original_path, new_path, dirs_exist_ok=True)
+    for j, person in enumerate([p for p in os.listdir(new_path) if p.startswith("p")]):
+        partition = [["test", "val"], ["train", "train"]][(j%15-11)//11][j%2]
+        os.makedirs(os.path.join(new_path, partition, person), exist_ok=True)
+        mats = filter(lambda x: x.endswith(".mat"), os.listdir(os.path.join(new_path, person)))
         # Convert mat files to pt files for faster loading
         for mat in mats:
-            data = loadmat(f"MPIIGaze_preprocessed2/{person}/{mat}")
+            data = loadmat(os.path.join(new_path, person, mat))
             for side in ["left", "right"]:
                 datum = data["data"][side].item()
                 for i in range(len(datum["image"].item())):
                     img = torch.unsqueeze(torch.tensor(datum["image"].item()[i]).float()/255., -1)
                     pose = torch.tensor(datum["pose"].item()[i]).float()
                     gaze = torch.tensor(datum["gaze"].item()[i]).float()
-                    # Split over train/val/test with 70/15/15 ratio
-                    partition = [["test", "val"], ["train", "train"]][(i%20-14)//14][i%2]
-                    torch.save((img, pose, gaze), f"MPIIGaze_preprocessed2/{partition}/{person}/{mat[:-4]}_{i}_{side}.pt")
-            os.remove(f"MPIIGaze_preprocessed2/{person}/{mat}")
+                    torch.save((img, pose, gaze), os.path.join(new_path, partition, person, f"{mat[:-4]}_{i}_{side}.pt"))
+            os.remove(os.path.join(new_path, person, mat))
 
 class MPIIGaze(Dataset):
     def __init__(self, path:str, n_clients:int):
