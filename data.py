@@ -4,13 +4,14 @@ from torch.utils.data import Dataset, DataLoader, default_collate
 from jax import numpy as jnp
 from functools import partial
 
-def preprocess(original_path="MPIIGaze/MPIIGaze/Data/Normalized", new_path="MPIIGaze_preprocessed2/"):
+def preprocess(original_path="MPIIGaze/MPIIGaze/Data/Normalized", new_path="MPIIGaze_preprocessed/"):
     """Run once."""
     # Split the MPIIGaze dataset into train/val/test sets.
     shutil.copytree(original_path, new_path, dirs_exist_ok=True)
-    for j, person in enumerate([p for p in os.listdir(new_path) if p.startswith("p")]):
-        partition = [["test", "val"], ["train", "train"]][(j%15-11)//11][j%2]
-        os.makedirs(os.path.join(new_path, partition, person), exist_ok=True)
+    for person in [p for p in os.listdir(new_path) if p.startswith("p")]:
+        os.makedirs(os.path.join(new_path, "train", person))
+        os.makedirs(os.path.join(new_path, "test", person))
+        os.makedirs(os.path.join(new_path, "val", person))
         mats = filter(lambda x: x.endswith(".mat"), os.listdir(os.path.join(new_path, person)))
         # Convert mat files to pt files for faster loading
         for mat in mats:
@@ -21,6 +22,8 @@ def preprocess(original_path="MPIIGaze/MPIIGaze/Data/Normalized", new_path="MPII
                     img = torch.unsqueeze(torch.tensor(datum["image"].item()[i]).float()/255., -1)
                     pose = torch.tensor(datum["pose"].item()[i]).float()
                     gaze = torch.tensor(datum["gaze"].item()[i]).float()
+                    # Split over train/val/test with 70/15/15 ratio
+                    partition = [["test", "val"], ["train", "train"]][(i%20-14)//14][i%2]
                     torch.save((img, pose, gaze), os.path.join(new_path, partition, person, f"{mat[:-4]}_{i}_{side}.pt"))
             os.remove(os.path.join(new_path, person, mat))
 
