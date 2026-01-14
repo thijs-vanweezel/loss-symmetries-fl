@@ -168,16 +168,16 @@ def jax_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray, 
 
     # Feature skew, by drawing a portion of the samples from the same feature distribution
     # Feature groups are interleaved by the Dataset
-    if skew=="feature":
+    if skew=="feature" or (skew=="label" and not gaze):
         same_dist_idxs = [range(c*int((1-beta)*len(imgs)/n_clients), (c+1)*int((1-beta)*len(imgs)/n_clients)) for c in range(n_clients)]
         diff_dist_idxs = [range(int((1-beta)*len(imgs))+c, len(imgs), n_clients) for c in range(n_clients)]
-        idxs = [jnp.asarray(list(same_dist_idxs[c]) + list(diff_dist_idxs[c])) for c in range(n_clients)]
+        idxs = [jnp.asarray(list(same_dist_idxs[c]) + list(diff_dist_idxs[c]), dtype=jnp.int32) for c in range(n_clients)]
     
     # Overlap reduction, by sharing a portion of the total samples while retaining another portion of the total samples
     elif skew=="overlap":
         n_indiv = int(beta/(beta+(1-beta)*n_clients) * len(imgs))
         diff_dist_idxs = [range(c*n_indiv, (c+1)*n_indiv) for c in range(n_clients)]
-        idxs = [jnp.asarray(list(diff_dist_idxs[c]) + list(range(n_clients*n_indiv, len(imgs)))) for c in range(n_clients)]
+        idxs = [jnp.asarray(list(diff_dist_idxs[c]) + list(range(n_clients*n_indiv, len(imgs))), dtype=jnp.int32) for c in range(n_clients)]
 
     # Label skew, by evenly dividing the samples into n directional groups, and then drawing from the same group
     # Assumes there is no order to the labels' values
@@ -190,12 +190,7 @@ def jax_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray, 
         # Divide the remainder indifferently (i.e., simply splitting indices)
         same_dist_idxs = [range(num_homo+c*num_homo//n_clients, num_homo+(c+1)*num_homo//n_clients) for c in range(n_clients)]
         # Consolidate
-        idxs = [jnp.asarray(list(same_dist_idxs[c]) + list(diff_dist_idxs[c])) for c in range(n_clients)]
-
-    elif skew=="label":
-        same_dist_idxs = [range(c*int((1-beta)*len(imgs)/n_clients), (c+1)*int((1-beta)*len(imgs)/n_clients)) for c in range(n_clients)]
-        diff_dist_idxs = [range(int((1-beta)*len(imgs))+c, len(imgs), n_clients) for c in range(n_clients)]
-        idxs = [jnp.asarray(list(same_dist_idxs[c]) + list(diff_dist_idxs[c])) for c in range(n_clients)]
+        idxs = [jnp.asarray(list(same_dist_idxs[c]) + list(diff_dist_idxs[c]), dtype=jnp.int32) for c in range(n_clients)]
 
     # Select and return
     clients_imgs = [imgs[idx] for idx in idxs]
@@ -228,7 +223,6 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
         assert n_clients<=3, "CityScapes supports a maximum of 3 clients."
         dataset = CityScapes(path="cityscapes/", partition=partition, n_clients=n_clients)
         assert skew in ["overlap", "feature"], "Skew must be either 'overlap' or 'feature'. For no skew, specify beta=0."
-        skew = "label" if skew=="feature" else "overlap" # functional implementation (i.e., interleaving) is equivalent
     collate = partial(jax_collate, n_clients=n_clients, beta=new_beta, skew=skew)
     # Iterable batches
     return DataLoader(
