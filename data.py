@@ -183,12 +183,12 @@ def jax_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray, 
     # Assumes there is no order to the labels' values
     elif skew=="label" and gaze:
         # Rank the non-shared samples by quadrant angle
-        num_homo = int((1-beta)*len(imgs))
+        homosplit = len(imgs) - int((1-beta)*len(imgs))
         angles = (jnp.arctan2(*labels.T) + 2*jnp.pi) % (2*jnp.pi)
-        sorter = jnp.argsort(angles[:len(imgs)-num_homo])
-        diff_dist_idxs = [sorter[c*len(sorter)//n_clients : (c+1)*len(sorter)//n_clients] for c in range(n_clients)]
+        sorter = jnp.argsort(angles[:homosplit])
+        diff_dist_idxs = [sorter[c*homosplit//n_clients : (c+1)*homosplit//n_clients] for c in range(n_clients)]
         # Divide the remainder indifferently (i.e., simply splitting indices)
-        same_dist_idxs = [range(num_homo+c*num_homo//n_clients, num_homo+(c+1)*num_homo//n_clients) for c in range(n_clients)]
+        same_dist_idxs = [range(homosplit+c, len(imgs), n_clients) for c in range(n_clients)]
         # Consolidate
         idxs = [jnp.asarray(list(same_dist_idxs[c]) + list(diff_dist_idxs[c]), dtype=jnp.int32) for c in range(n_clients)]
 
