@@ -31,7 +31,7 @@ def get_updates(model_g, models):
     return jax.tree.map(lambda pg, p: p-pg, params_g, params) # state of length n_layers with arrays of shape (n_clients, *layer_shape)
 
 def aggregate(model_g, updates):
-    # Get global model's structure, along with its parameters/rest (which have no client dimension)
+    # Get global model's structure, along with its parameters/rest
     struct, params_g, rest = nnx.split(model_g, (nnx.Param, nnx.BatchStat), ...)
     # Average updates
     update = jax.tree.map(lambda x: jnp.mean(x, axis=0), updates)
@@ -48,8 +48,8 @@ def cast(module_g, n):
     models = nnx.merge(struct, params_all)
     return models
 
-def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str="early", filename:str=None, n_clients=4, 
-          max_patience:int=None, rounds:int|str="early", val_fn=None, tmp_file:str=None):
+def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str="early", ckpt_fp:str=None, n_clients=4, 
+          max_patience:int=None, rounds:int|str="early", val_fn=None):
     """
     Federated training loop. 
     Args:
@@ -59,7 +59,7 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
         ell: Loss function with signature ( model, model_g, y, *xs ) -> loss
         ds_val: Optional iterable validation dataset with signature ( y, *xs ), of which both arguments have shape ( n_clients, batch_size, ... )
         local_epochs: Number of local epochs per communication round, or "early" for early stopping based on validation loss
-        filename: If provided, saves model parameters to this file at each epoch
+        ckpt_fp: If provided, saves model parameters to this path at each epoch
         n_clients: Number of clients
         max_patience: Maximum patience for early stopping (if local_epochs or rounds is "early")
         rounds: Number of communication rounds, or "early" for early stopping based on validation loss
@@ -74,7 +74,9 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
         model_g = aggregate(model_init, updates)
         ```
     """
-    tmp_file = tmp_file or f"tmp_fedflax_{hash(model_g.__repr__())}.pkl"
+    ckpt = bool(ckpt_fp)
+    ckpt_fp, ext = os.path.splitext(ckpt_fp or f"tmp_fedflax_{hash(model_g.__repr__())}.pkl")
+    os.makedirs(os.path.split(ckpt_fp)[0], exist_ok=True)
     # Validation function for local early stopping that can be used as stand-alone
     if isinstance(local_epochs, str):
         local_val_fn = nnx.jit(nnx.vmap(
@@ -96,7 +98,7 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
         epoch = 0
         while (epoch!=local_epochs) if local_epochs!="early" else (local_patience<=max_patience):
             # Collect and save params for visualization
-            if filename: save(models, filename, n_clients, overwrite=(r==0 and epoch==0))
+            if ckpt: save_model(models, f"{ckpt_fp}_{r}_{epoch}{ext}")
             # Iterate over batches
             for batch, (y, *xs) in enumerate(bar := tqdm(ds_train, leave=False)):
                 # Create train step function if first iteration
@@ -117,12 +119,12 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
                 else:
                     # ... otherwise continue training and save best model
                     local_patience = 1
-                    save_model(models, tmp_file)
+                    save_model(models, ckpt_fp+ext)
             epoch += 1
         
         # Aggregate
         if local_epochs=="early":
-            models = load_model(lambda: models, tmp_file)
+            models = load_model(lambda: models, ckpt_fp+ext)
         updates = get_updates(model_g, models)
         model_g = aggregate(model_g, updates)
         
@@ -143,17 +145,14 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
             else:
                 # ... otherwise continue training and save best model
                 patience = 1
-                save_model(models, tmp_file)
-        # If not early stopping, just print progress and save model
-        else:
-            print(f"round {r} ({epoch} local epochs)")
+                save_model(models, ckpt_fp+ext)
         r += 1
     
     # Save final params
-    if filename: save(cast(model_g, n_clients), filename, n_clients, overwrite=False)
+    if ckpt: save_model(cast(model_g, n_clients), f"{ckpt_fp}_{r}_{epoch}{ext}")
 
     # Return the final local models, i.e., before aggregation
-    if rounds=="early":
-        models = load_model(lambda: models, tmp_file)
-        os.remove(tmp_file)
+    if rounds=="early" or local_epochs=="early":
+        models = load_model(lambda: models, ckpt_fp+ext)
+        os.remove(ckpt_fp+ext)
     return models, r-patience-1
