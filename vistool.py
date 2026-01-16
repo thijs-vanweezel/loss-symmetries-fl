@@ -3,6 +3,8 @@ from jax import numpy as jnp
 from flax import nnx
 from functools import reduce
 from matplotlib import pyplot as plt
+from utils import load_model
+from models import LeNet
 plt.style.use("seaborn-v0_8-pastel")
 plt.rcParams.update({
     "text.usetex": True,
@@ -52,7 +54,7 @@ def compute_surface(alpha_grid, beta_grid, pca, reconstruct, ds, val_fn, interpo
         return errs, alpha_grid_fine, beta_grid_fine
     return errs
 
-def plot_trajectory(errs, model_idx, epochs, reduced_params, alpha_grid, beta_grid, filename, labels=True):
+def plot_trajectory(errs, pca, fps, alpha_grid, beta_grid, filename, labels=True):
     # Plot
     fig, ax = plt.subplots(figsize=(6,6), dpi=300)
     fig.tight_layout()
@@ -71,22 +73,27 @@ def plot_trajectory(errs, model_idx, epochs, reduced_params, alpha_grid, beta_gr
         bar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=plot.cmap), ax=ax, shrink=0.8, ticks=None)
         bar.set_label("Accuracy")
     # Plot the model paths (assume params are sorted by optimization step)
-    for i in jnp.unique(model_idx):
-        idx = jnp.where(model_idx==i)[0]
-        # Path
-        ax.plot(reduced_params[idx,0], reduced_params[idx,1], c=f"C{i.item()+1}", label=f"Client {i.item()}", lw=1)
-        # Color uniformly at aggregation points
-        colors = [f"C{c.item()}" for c in jnp.array([i+1]*len(idx))*(1-jnp.maximum(1-jnp.arange(len(idx))%epochs, 0))]
-        colors = [c if c!="C0" else "red" for c in colors]
-        # Circle initial model
-        linewidths = [2.]+[0.]*(len(idx)-1)
-        sizes = [30.]+[10.]*(len(idx)-1)
-        # Points
-        ax.scatter(reduced_params[idx,0], reduced_params[idx,1], c=colors, s=sizes, linewidths=linewidths, edgecolors="k")
+    prev_coords = None
+    for fp in fps:
+        # Flatten parameters
+        params = nnx.state(load_model(LeNet, fp), (nnx.Param, nnx.BatchStat))
+        params = jax.tree.reduce(lambda acc, p: jnp.concatenate([acc, p.reshape(p.shape[0],-1)], axis=1), params, jnp.empty((4,0)))
+        coords = pca.transform(params)
+        # Plot as line
+        if prev_coords:
+            ax.add_collection(mpl.collections.LineCollection(
+                zip(prev_coords, coords), 
+                colors=[f"C{c+1}" for c in range(coords.shape[1])]
+            ))
+        # Plot points
+        aggregate = jnp.allclose(coords[0], coords[1])
+        colors = ["red" if aggregate else f"C{c}" for c in range(coords.shape[1])]
+        lw = 2 if aggregate else 0
+        size = 30 if aggregate else 10
+        ax.scatter(coords[:,0], coords[:,1], c=colors, s=size, linewidths=lw, edgecolors="k")
     # Display accuracy of final aggregated model
-    aggr_coords = reduced_params[-1]
-    aggr_coords_discrete = jnp.argmin(jnp.abs(alpha_grid - aggr_coords[0])), jnp.argmin(jnp.abs(beta_grid - aggr_coords[1]))
-    ax.annotate(f"{int(errs[aggr_coords_discrete])}°", xy=aggr_coords, c="k", fontsize=25)
+    coords_discrete = jnp.argmin(jnp.abs(alpha_grid - coords[0,0])), jnp.argmin(jnp.abs(beta_grid - coords[0,1]))
+    ax.annotate(f"{int(errs[coords_discrete])}°", xy=coords, c="k", fontsize=25)
     # Show
     if labels:
         handles, labels = ax.get_legend_handles_labels()
