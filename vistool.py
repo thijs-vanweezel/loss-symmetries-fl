@@ -56,11 +56,11 @@ def compute_surface(alpha_grid, beta_grid, pca, reconstruct, ds, val_fn, interpo
 
 def plot_trajectory(errs, pca, fps, alpha_grid, beta_grid, filename, labels=True):
     # Plot
-    fig, ax = plt.subplots(figsize=(6,6), dpi=300)
+    fig, ax = plt.subplots(figsize=(6,6), dpi=700)
     fig.tight_layout()
     ax.set_box_aspect(1)
     # Plot the level sets, exponential scale
-    norm = mpl.colors.Normalize(vmin=5., vmax=15.)
+    norm = mpl.colors.LogNorm()
     plot = ax.pcolormesh(
         alpha_grid,
         beta_grid,
@@ -68,32 +68,35 @@ def plot_trajectory(errs, pca, fps, alpha_grid, beta_grid, filename, labels=True
         shading="auto",
         cmap="inferno",
         norm=norm,
+        zorder=0
     )
     if labels:
         bar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=plot.cmap), ax=ax, shrink=0.8, ticks=None)
-        bar.set_label("Accuracy")
+        bar.set_label("Error")
     # Plot the model paths (assume params are sorted by optimization step)
     prev_coords = None
-    for fp in fps:
+    for i, fp in enumerate(fps):
         # Flatten parameters
         params = nnx.state(load_model(LeNet, fp), (nnx.Param, nnx.BatchStat))
         params = jax.tree.reduce(lambda acc, p: jnp.concatenate([acc, p.reshape(p.shape[0],-1)], axis=1), params, jnp.empty((4,0)))
         coords = pca.transform(params)
         # Plot as line
-        if prev_coords:
+        if prev_coords is not None:
             ax.add_collection(mpl.collections.LineCollection(
                 zip(prev_coords, coords), 
-                colors=[f"C{c+1}" for c in range(coords.shape[1])]
+                colors=[f"C{c+1}" for c in range(coords.shape[0])],
+                zorder=1
             ))
         # Plot points
         aggregate = jnp.allclose(coords[0], coords[1])
-        colors = ["red" if aggregate else f"C{c}" for c in range(coords.shape[1])]
-        lw = 2 if aggregate else 0
-        size = 30 if aggregate else 10
-        ax.scatter(coords[:,0], coords[:,1], c=colors, s=size, linewidths=lw, edgecolors="k")
+        colors = "red" if aggregate else [f"C{c}" for c in range(coords.shape[0])]
+        lw = 1 if aggregate and i==0 else 0
+        size = 10 if aggregate and i==0 else 7
+        ax.scatter(coords[:,0], coords[:,1], c=colors, s=size, linewidths=lw, edgecolors="k", zorder=2)
+        prev_coords = coords
     # Display accuracy of final aggregated model
     coords_discrete = jnp.argmin(jnp.abs(alpha_grid - coords[0,0])), jnp.argmin(jnp.abs(beta_grid - coords[0,1]))
-    ax.annotate(f"{int(errs[coords_discrete])}°", xy=coords, c="k", fontsize=25)
+    ax.annotate(f"{int(errs[coords_discrete])}°", xy=coords_discrete, c="k", fontsize=25)
     # Show
     if labels:
         handles, labels = ax.get_legend_handles_labels()
