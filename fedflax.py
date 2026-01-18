@@ -75,7 +75,7 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
         ```
     """
     ckpt = bool(ckpt_fp)
-    ckpt_fp, ext = os.path.splitext(ckpt_fp or f"tmp_fedflax_{hash(model_g.__repr__())}.pkl")
+    ckpt_fp, ext = os.path.splitext(ckpt_fp or f"./tmp_fedflax_{hash(model_g.__repr__())}.pkl")
     os.makedirs(os.path.split(ckpt_fp)[0], exist_ok=True)
     # Validation function for local early stopping that can be used as stand-alone
     if isinstance(local_epochs, str):
