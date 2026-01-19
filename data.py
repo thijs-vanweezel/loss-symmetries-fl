@@ -188,7 +188,7 @@ def jax_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray, 
         sorter = jnp.argsort(angles[:homosplit])
         diff_dist_idxs = [sorter[c*homosplit//n_clients : (c+1)*homosplit//n_clients] for c in range(n_clients)]
         # Divide the remainder indifferently (i.e., simply splitting indices)
-        same_dist_idxs = [range(homosplit+c, len(imgs), n_clients) for c in range(n_clients)]
+        same_dist_idxs = [range(homosplit+c*int((1-beta)*len(imgs)/n_clients), homosplit+(c+1)*int((1-beta)*len(imgs)/n_clients)) for c in range(n_clients)]
         # Consolidate
         idxs = [jnp.asarray(list(same_dist_idxs[c]) + list(diff_dist_idxs[c]), dtype=jnp.int32) for c in range(n_clients)]
 
