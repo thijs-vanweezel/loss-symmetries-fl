@@ -14,13 +14,14 @@ def save(models, filename, n, overwrite):
         with NpyAppendArray(filename, delete_if_exists=overwrite) as f:
             f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(nnx.split(models, (nnx.Param, nnx.BatchStat), ...)[1])], axis=1))
 
-# Parallelized train step
 def return_train_step(ell, n_inputs):
+    # Parallelize loss (returns grad for each client)
+    ell = nnx.vmap(nnx.value_and_grad(ell), in_axes=(0,None,0)+(0,)*n_inputs)
+    # Make fast
     @nnx.jit
-    @nnx.vmap(in_axes=(0,None,0,0)+(0,)*n_inputs)
-    def train_step(model, model_g, opt, y, *xs):
-        loss, grad = nnx.value_and_grad(ell)(model, model_g, y, *xs)
-        opt.update(grad)
+    def train_step(models, model_g, opt, y, *xs):
+        loss, grad = ell(models, model_g, y, *xs)
+        opt.update(grad) # Assumes it refers to the correct models
         return loss
     return train_step
 
@@ -48,7 +49,7 @@ def cast(module_g, n):
     models = nnx.merge(struct, params_all)
     return models
 
-def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str="early", ckpt_fp:str=None, n_clients=4, 
+def train(model_g, opt, ds_train, ell, ds_val=None, local_epochs:int|str="early", ckpt_fp:str=None, n_clients=4, 
           max_patience:int=None, rounds:int|str="early", val_fn=None):
     """
     Federated training loop. 
@@ -90,7 +91,7 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
     while (r!=rounds) if rounds!="early" else (patience<=max_patience):
         # Parallelize global model and optimizers
         models = cast(model_g, n_clients)
-        opts = nnx.vmap(opt_create)(models)
+        opt.model = models # can also be done laboriously with nnx.merge
         
         # Local training
         local_val_losses = []
@@ -105,7 +106,7 @@ def train(model_g, opt_create, ds_train, ell, ds_val=None, local_epochs:int|str=
                 if batch==0 and epoch==0 and r==0:
                     train_step = return_train_step(ell, n_inputs:=len(xs))
                 # Train step
-                loss = train_step(models, model_g, opts, y, *xs)
+                loss = train_step(models, model_g, opt, y, *xs)
                 # Inform user
                 bar.set_description(f"Round {r}/{rounds}, epoch {epoch}/{local_epochs} (local validation score: {'N/A' if epoch==0 or local_epochs!='early' else val}, local batch loss: {loss.mean():.4f})")
             # Evaluate on local validation
