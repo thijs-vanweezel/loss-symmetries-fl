@@ -6,7 +6,6 @@ from functools import reduce
 from npy_append_array import NpyAppendArray
 from jax import numpy as jnp
 from flax import nnx
-from functools import partial
 from tqdm.auto import tqdm
 from utils import save_model, load_model
 
@@ -49,13 +48,13 @@ def cast(module_g, n):
     models = nnx.merge(struct, params_all)
     return models
 
-def train(model_g, opt, ds_train, ell, ds_val=None, local_epochs:int|str="early", ckpt_fp:str=None, n_clients=4, 
+def train(model_g:nnx.State, opt:nnx.Optimizer, ds_train, ell, ds_val=None, local_epochs:int|str="early", ckpt_fp:str=None, n_clients=4, 
           max_patience:int=None, rounds:int|str="early", val_fn=None):
     """
     Federated training loop. 
     Args:
         model_g: Initialized global model
-        opt_create: Function that creates optimizer when given a model
+        opt: Optimizer instance, initialized on the global model
         ds_train: Iterable training dataset with signature ( y, *xs ), of which both arguments have shape ( n_clients, batch_size, ... )
         ell: Loss function with signature ( model, model_g, y, *xs ) -> loss
         ds_val: Optional iterable validation dataset with signature ( y, *xs ), of which both arguments have shape ( n_clients, batch_size, ... )
