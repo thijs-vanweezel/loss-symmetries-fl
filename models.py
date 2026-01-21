@@ -428,8 +428,9 @@ class ViTAutoEncoder(nnx.Module):
             from vit_jax.models_vit import VisionTransformer
             from ml_collections.config_dict import ConfigDict
             if not importlib.util.find_spec("tensorflow"):
-                flax.io.gfile = flax.io
-                sys.modules["tensorflow.io"] = flax.io
+                from flax import io as fio
+                fio.gfile = fio
+                sys.modules["tensorflow.io"] = fio
             from vit_jax.checkpoint import load, inspect_params, _fix_groupnorm
         except ImportError as e:
             e.msg += "\nInstall vit_jax with flag `--no-deps` from https://github.com/google-research/vision_transformer"
