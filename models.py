@@ -449,13 +449,17 @@ class ViTAutoEncoder(nnx.Module):
         })
         backbone = VisionTransformer(**config)
         reference_params = backbone.init(jax.random.key(42), jnp.ones((1,224,224,3), jnp.bfloat16), train=False)["params"]
-        # Dumbed down version of `load_pretrained` disregarding head
+        # Dumbed down version of `load_pretrained` removing head
+        # Also converts to bfloat16
         # Case where posemb_new.shape!=posemb.shape is not handled
         params = _fix_groupnorm(inspect_params(
             params=load(path),
             expected=reference_params,
             fail_if_extra=False,
             fail_if_missing=False))
+        params = jax.tree.map(lambda leaf: jnp.asarray(leaf, dtype=jnp.bfloat16), params)
+        params.pop("head", None)
+        params.pop("cls", None)
         if config.get("representation_size") is None and "pre_logits" in params:
             params["pre_logits"] = {}
         if version.parse(flax.__version__) >= version.parse("0.3.6"):
