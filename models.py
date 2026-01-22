@@ -464,13 +464,13 @@ class ViTAutoEncoder(nnx.Module):
             params["pre_logits"] = {}
         if version.parse(flax.__version__) >= version.parse("0.3.6"):
             params = _fix_groupnorm(params)
-        params = flax.core.freeze(params)
+        params = NonTrainable(flax.core.freeze(params))
         # Define inference function
         return jax.jit(partial(backbone.apply, train=False)), params
 
     def __call__(self, x, train=None):
         # Encode with ViT
-        x = self.encode_fn({"params": self.params}, x)
+        x = self.encode_fn({"params": self.params.value}, x)
         x = jnp.expand_dims(x, -1)
         for i, layer in enumerate(self.layers):
             # Apply layer
