@@ -74,7 +74,7 @@ def load_model(return_model, filename, **kwargs):
         filename: File from which to load the model state
     """
     abstract_model = nnx.eval_shape(return_model, **kwargs)
-    struct, _state = nnx.split(abstract_model, ...)
+    struct = nnx.graphdef(abstract_model)
     state = pickle.load(open(filename, "rb"))
     model = nnx.merge(struct, state)
     return model
