@@ -5,6 +5,7 @@ from flax.nnx.nn.linear import _conv_dimension_numbers
 import jax, flax, sys, importlib
 from functools import partial
 from packaging import version
+from ml_collections.config_dict import ConfigDict
 
 # Dimension expansion
 @jax.vmap
@@ -400,14 +401,56 @@ def teleport_lenet(model, key, tau_range=.1):
     # Rebuild the model
     return nnx.from_tree(jax.tree.unflatten(struct, params_tele))
 
+# Config copied from the ViT-B_16 at https://github.com/google-research/vision_transformer/blob/main/vit_jax/configs/models.py#L113
+defaultconfig = ConfigDict({
+    "num_classes": 0, # No classification head
+    "patches": ConfigDict({"size": (16, 16)}),
+    "model_name": "ViT-B_16",
+    "transformer": ConfigDict(
+        {"mlp_dim": 3072, "num_heads": 12, "num_layers": 12, "attention_dropout_rate": 0.0, "dropout_rate": 0.0, "add_position_embedding": False}
+    ),
+    "classifier": "unpooled",
+    "representation_size": None,
+    "hidden_size": 768
+})
+def fetch_vit(path="models/ViT-B_16.npz", config=defaultconfig):
+    """
+    The weights for the backbone are available at https://console.cloud.google.com/storage/browser/vit_models/imagenet21k. 
+    Any version should do, if you change the config accordingly.
+    """
+    try: 
+        if not importlib.util.find_spec("tensorflow"):
+            from flax import io as fio
+            fio.gfile = fio
+            sys.modules["tensorflow.io"] = fio
+        from vit_jax.models_vit import VisionTransformer
+        from vit_jax.checkpoint import load, inspect_params, _fix_groupnorm
+    except ImportError as e:
+        e.msg += "\nInstall vit_jax with flag `--no-deps` from https://github.com/google-research/vision_transformer"
+    
+    model = VisionTransformer(**config)
+    reference_params = model.init(jax.random.key(42), jnp.ones((1,224,224,3), jnp.bfloat16), train=False)["params"]
+    # Dumbed down version of `load_pretrained` removing unused parameters
+    # Also converts to bfloat16
+    # Case where posemb_new.shape!=posemb.shape is not handled
+    params = _fix_groupnorm(inspect_params(
+        params=load(path),
+        expected=reference_params,
+        fail_if_extra=False,
+        fail_if_missing=False))
+    params = jax.tree.map(lambda leaf: jnp.asarray(leaf, dtype=jnp.bfloat16), params)
+    for key in set(params.keys()).difference(reference_params.keys()):
+        params.pop(key)
+    params = flax.core.freeze(params)
+    # Return linen model
+    return model, params
+
 class ViTAutoEncoder(nnx.Module):
-    def __init__(self, path="models/ViT-B_16.npz", n_layers=5, key=jax.random.key(0), out_shape=(224,224), **asymkwargs):
-        """
-        The weights for the backbone are available at https://console.cloud.google.com/storage/browser/vit_models/imagenet21k. 
-        Any version should do, if you change the config accordingly.
-        """
+    def __init__(self, n_layers=5, key=jax.random.key(0), out_shape=(224,224), **asymkwargs):
         super().__init__()
-        self.encode_fn, self.params = self.fetch_vit(path)
+        backbone, bbparams = fetch_vit()
+        self.bbparams = NonTrainable(bbparams)
+        self.encode_fn = jax.jit(partial(backbone.apply, train=False))
         keys = jax.random.split(key, n_layers)
         self.layers = []
         self.n_layers = n_layers
@@ -423,54 +466,9 @@ class ViTAutoEncoder(nnx.Module):
                 **asymkwargs
             ))
 
-    def fetch_vit(self, path):
-        try: 
-            from vit_jax.models_vit import VisionTransformer
-            from ml_collections.config_dict import ConfigDict
-            if not importlib.util.find_spec("tensorflow"):
-                from flax import io as fio
-                fio.gfile = fio
-                sys.modules["tensorflow.io"] = fio
-            from vit_jax.checkpoint import load, inspect_params, _fix_groupnorm
-        except ImportError as e:
-            e.msg += "\nInstall vit_jax with flag `--no-deps` from https://github.com/google-research/vision_transformer"
-        
-        # Config copied from the ViT-B_16 at https://github.com/google-research/vision_transformer/blob/main/vit_jax/configs/models.py#L113
-        config = ConfigDict({
-            "num_classes": 0, # No classification head
-            "patches": ConfigDict({"size": (16, 16)}),
-            "model_name": "ViT-B_16",
-            "transformer": ConfigDict(
-                {"mlp_dim": 3072, "num_heads": 12, "num_layers": 12, "attention_dropout_rate": 0.0, "dropout_rate": 0.0, "add_position_embedding": False}
-            ),
-            "classifier": "unpooled",
-            "representation_size": None,
-            "hidden_size": 768
-        })
-        backbone = VisionTransformer(**config)
-        reference_params = backbone.init(jax.random.key(42), jnp.ones((1,224,224,3), jnp.bfloat16), train=False)["params"]
-        # Dumbed down version of `load_pretrained` removing head
-        # Also converts to bfloat16
-        # Case where posemb_new.shape!=posemb.shape is not handled
-        params = _fix_groupnorm(inspect_params(
-            params=load(path),
-            expected=reference_params,
-            fail_if_extra=False,
-            fail_if_missing=False))
-        params = jax.tree.map(lambda leaf: jnp.asarray(leaf, dtype=jnp.bfloat16), params)
-        params.pop("head", None)
-        params.pop("cls", None)
-        if config.get("representation_size") is None and "pre_logits" in params:
-            params["pre_logits"] = {}
-        if version.parse(flax.__version__) >= version.parse("0.3.6"):
-            params = _fix_groupnorm(params)
-        params = NonTrainable(flax.core.freeze(params))
-        # Define inference function
-        return jax.jit(partial(backbone.apply, train=False)), params
-
     def __call__(self, x, train=None):
         # Encode with ViT
-        x = self.encode_fn({"params": self.params.value}, x)
+        x = self.encode_fn({"params": self.bbparams.value}, x)
         x = jnp.expand_dims(x, -1)
         for i, layer in enumerate(self.layers):
             # Apply layer
