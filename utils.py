@@ -66,7 +66,8 @@ def functional_drift(models, ds_test):
 
 def save_model(model, filename):
     state = nnx.state(model, ...)
-    pickle.dump(state, open(filename, "wb"))
+    with open(filename, "wb") as f:
+        pickle.dump(state, f)
 
 def load_model(return_model, filename, **kwargs):
     """Args:
@@ -75,7 +76,8 @@ def load_model(return_model, filename, **kwargs):
     """
     abstract_model = nnx.eval_shape(return_model, **kwargs)
     struct = nnx.graphdef(abstract_model)
-    state = pickle.load(open(filename, "rb"))
+    with open(filename, "rb") as f:
+        state = pickle.load(f)
     model = nnx.merge(struct, state)
     return model
 
