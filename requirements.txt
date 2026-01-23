@@ -4,7 +4,6 @@ clu
 einops
 ml-collections
 pandas
---no-deps git+https://github.com/google-research/vision_transformer
 tqdm
 ipywidgets
 numpy
