@@ -6,6 +6,7 @@ import jax, flax, sys, importlib
 from functools import partial
 from packaging import version
 from ml_collections.config_dict import ConfigDict
+from unetr import UNETR
 
 # Dimension expansion
 @jax.vmap
