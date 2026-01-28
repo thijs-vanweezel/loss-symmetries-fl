@@ -44,7 +44,7 @@ def aggregate(model_g, updates):
 # Broadcast global model to clients
 def cast(module_g, n):
     struct, params_g = nnx.split(module_g, ...)
-    params_all = jax.tree.map(lambda x: jnp.repeat(jnp.expand_dims(x, 0), n, 0), params_g)
+    params_all = jax.tree.map(lambda x: jnp.repeat(jnp.expand_dims(x.squeeze(), 0), n, 0), params_g)
     models = nnx.merge(struct, params_all)
     return models
 
