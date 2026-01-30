@@ -3,15 +3,10 @@ os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
 os.environ["XLA_FLAGS"] += " --xla_gpu_strict_conv_algorithm_picker=false"
 import jax, numpy as np
 from functools import reduce
-from npy_append_array import NpyAppendArray
 from jax import numpy as jnp
 from flax import nnx
 from tqdm.auto import tqdm
 from utils import save_model, load_model
-
-def save(models, filename, n, overwrite):
-        with NpyAppendArray(filename, delete_if_exists=overwrite) as f:
-            f.append(np.concat([p.reshape(n,-1) for p in jax.tree.leaves(nnx.split(models, (nnx.Param, nnx.BatchStat), ...)[1])], axis=1))
 
 def return_train_step(ell, n_inputs):
     # Parallelize loss (returns grad for each client)
