@@ -13,7 +13,11 @@ opt_create = lambda model, learning_rate, **kwargs: nnx.Optimizer(
 # Regression loss
 def return_l2(omega):
     def ell(model, model_g, y, *xs):
-        prox = sum(jax.tree.map(lambda a, b: jnp.sum((a-b)**2), jax.tree.leaves(nnx.to_tree(model)), jax.tree.leaves(nnx.to_tree(model_g))))
+        prox = sum(jax.tree.map(
+            lambda a, b: jnp.sum((a-b)**2), 
+            jax.tree.leaves(nnx.state(model, nnx.Param)), 
+            jax.tree.leaves(nnx.state(model_g, nnx.Param))
+        ))
         l2 = jnp.square(model(*xs, train=True) - y).mean()
         return l2 + omega/2 * prox
     return ell
@@ -34,7 +38,11 @@ def angle_err(model, y, *xs):
 # Classification loss including softmax layer over last dimension
 def return_ce(omega):
     def ell(model, model_g, y, *xs):
-        prox = sum(jax.tree.map(lambda a, b: jnp.sum((a-b)**2), jax.tree.leaves(nnx.to_tree(model)), jax.tree.leaves(nnx.to_tree(model_g))))
+        prox = sum(jax.tree.map(
+            lambda a, b: jnp.sum((a-b)**2), 
+            jax.tree.leaves(nnx.state(model, nnx.Param)), 
+            jax.tree.leaves(nnx.state(model_g, nnx.Param))
+        ))
         ce = optax.softmax_cross_entropy(model(*xs, train=True), y, axis=-1).mean()
         return omega/2*prox + ce
     return ell
