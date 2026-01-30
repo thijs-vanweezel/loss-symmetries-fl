@@ -1,3 +1,4 @@
+# Mostly based on https://docs.jaxstack.ai/en/latest/JAX_examples_image_segmentation.html
 from jax import numpy as jnp
 from flax import nnx
 import jax
@@ -497,7 +498,7 @@ class UNETR(nnx.Module):
         x = jnp.permute_dims(x, self.proj_axes)
         return x
 
-    def __call__(self, x_in: jax.Array) -> jax.Array:
+    def __call__(self, x_in: jax.Array, train:bool=None) -> jax.Array:
         x, hidden_states_out = self.vit(x_in)
         enc1 = self.encoder1(x_in)
         x2 = hidden_states_out[3]
