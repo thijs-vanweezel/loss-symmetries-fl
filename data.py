@@ -58,8 +58,9 @@ class MPIIGaze(Dataset):
         return label, img, aux
 
 class ImageNet(Dataset):
-    def __init__(self, path:str="./imagenet/Data/CLS-LOC/train/", n_clients:int=4, n_classes:int=1000):
-        g = os.walk(path)
+    def __init__(self, path:str="./imagenet/Data/CLS-LOC/", partition:str="train", n_clients:int=4, n_classes:int=1000):
+        self.partition = partition
+        g = os.walk(os.path.join(path, partition))
         # Get class names and limit to n_classes by skipping
         classes = next(g)[1]
         classes = classes[::len(classes)//n_classes]
@@ -85,6 +86,15 @@ class ImageNet(Dataset):
         # Misc attributes
         self.n_clients = n_clients
         self.n_classes = n_classes
+        # Augmentations
+        self.val_augs = torchvision.transforms.Resize(224)
+        self.train_augs = torchvision.transforms.Compose([
+            torchvision.transforms.RandomAffine(degrees=(-15,15)),
+            torchvision.transforms.RandomHorizontalFlip(),
+            torchvision.transforms.Resize(256),
+            torchvision.transforms.RandomCrop(224),
+            torchvision.transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.1)
+        ])
 
     def __len__(self):
         # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
@@ -97,15 +107,20 @@ class ImageNet(Dataset):
         label, filepath = self.data[c][i]
         # Load image
         img = torchvision.io.decode_image(filepath, mode="RGB").float() / 255.
-        img = torchvision.transforms.Resize(256)(img)
-        img = torchvision.transforms.CenterCrop(224)(img)
+        if self.partition=="train": img = self.train_augs(img)
+        else: img = self.val_augs(img)
         img = img.swapaxes(0,2)
         # One-hot encode labels
         label = torch.eye(self.n_classes)[label]
         return label, img
 
 class CityScapes(Dataset):
-    def __init__(self, path:str="./cityscapes/", partition:str="train", n_clients:int=4):
+    def __init__(self, path:str="./cityscapes/", partition:str="train", n_clients:int=4, seed=None):
+        if seed is not None: self.seed = seed 
+        else:
+            self.seed = torch.Generator()
+            self.seed.manual_seed(42)
+        self.partition = partition
         g = os.walk(os.path.join(path, "leftImg8bit", partition))
         # Get location names
         cities = next(g)[1]
@@ -133,6 +148,33 @@ class CityScapes(Dataset):
         # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
         return min([len(files) for files in self.data.values()])*self.n_clients
     
+    def train_aug(self, img, mask):
+        """Deterministic train augmentations"""
+        # Flip
+        if torch.bernoulli(torch.tensor(.5), generator=self.seed).item():
+            img = torchvision.transforms.functional.hflip(img) 
+            mask = torchvision.transforms.functional.hflip(mask)
+        # Resize
+        img = torchvision.transforms.functional.resize(img, 256)
+        mask = torchvision.transforms.functional.resize(mask, 256, 
+                                                         interpolation=torchvision.transforms.InterpolationMode.NEAREST, 
+                                                         antialias=False)
+        # Crop
+        i = torch.randint(0, img.shape[1]-224+1, (), generator=self.seed).item()
+        j = torch.randint(0, img.shape[2]-224+1, (), generator=self.seed).item()
+        img = torchvision.transforms.functional.crop(img, i, j, 224, 224)
+        mask = torchvision.transforms.functional.crop(mask, i, j, 224, 224)
+        # Rotate
+        angle = torch.empty(()).uniform_(-15, 15, generator=self.seed).item()
+        img = torchvision.transforms.functional.affine(img, angle, (0,0), 1., 0)
+        mask = torchvision.transforms.functional.affine(mask, angle, (0,0), 1., 0)
+        # Color jitter
+        brightness = torch.empty(()).uniform_(0.8, 1.2, generator=self.seed).item()
+        contrast = torch.empty(()).uniform_(0.8, 1.2, generator=self.seed).item()
+        img = torchvision.transforms.functional.adjust_brightness(img, brightness)
+        img = torchvision.transforms.functional.adjust_contrast(img, contrast)
+        return img, mask
+    
     def __getitem__(self, idx):
         # Load datum
         c = idx % self.n_clients
@@ -140,17 +182,24 @@ class CityScapes(Dataset):
         filepath = self.data[c][i]
         # Load image
         img = torchvision.io.decode_image(filepath, mode="RGB").float() / 255.
-        img = torchvision.transforms.Resize(256)(img)
-        img = torchvision.transforms.CenterCrop(224)(img)
-        img = torch.permute(img, (1,2,0))
         # Load label image
         labelpath = filepath.replace("leftImg8bit", "gtFine").replace(".png", "_labelIds.png")
         indices = torchvision.io.decode_image(labelpath).long()
         indices = self.conversion[indices]
-        indices = torchvision.transforms.Resize(256, interpolation=torchvision.transforms.InterpolationMode.NEAREST)(indices)
-        indices = torchvision.transforms.CenterCrop(224)(indices).squeeze()
-        label = torch.zeros((*indices.shape, 20), dtype=torch.float32)
-        label = label.scatter(-1, indices.unsqueeze(-1), 1.)
+        # One-hot encode labels
+        label = torch.zeros((20,*indices.shape[1:]), dtype=torch.float32)
+        label = label.scatter(0, indices, 1.)
+        # Apply augmentations
+        if self.partition=="train": 
+            img, label = self.train_aug(img, label)
+            self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
+        else: 
+            img = torchvision.transforms.functional.resize(img, 224)
+            label = torchvision.transforms.functional.resize(label, 224, 
+                                                             interpolation=torchvision.transforms.InterpolationMode.NEAREST, 
+                                                             antialias=False)
+        img = torch.permute(img, (1,2,0))
+        label = torch.permute(label, (1,2,0))
         return label, img
 
 def jax_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
@@ -216,7 +265,7 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
         dataset = MPIIGaze(n_clients=n_clients, path=os.path.join("MPIIGaze_preprocessed", partition))
         assert skew in ["feature", "overlap", "label"], "Skew must be one of 'feature', 'overlap', or 'label'. For no skew, specify beta=0."
     elif dataset==1:
-        dataset = ImageNet(path=os.path.join("imagenet/Data/CLS-LOC", partition), n_clients=n_clients, n_classes=n_classes)
+        dataset = ImageNet(path="imagenet/Data/CLS-LOC", partition=partition, n_clients=n_clients, n_classes=n_classes)
         assert skew in ["overlap", "label"], "Skew must be either 'overlap' or 'label'. For no skew, specify beta=0."
     else:
         assert n_clients<=3, "CityScapes supports a maximum of 3 clients."
