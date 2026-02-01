@@ -1,7 +1,7 @@
 import jax, optax, pickle
 from jax import numpy as jnp
 from flax import nnx
-from functools import reduce
+from functools import partial, reduce
 
 # Optimizer
 opt_create = lambda model, learning_rate, **kwargs: nnx.Optimizer(
@@ -51,17 +51,25 @@ def return_ce(omega):
 err_fn = lambda m,y,*xs: 1-(m(*xs,train=False).argmax(-1)==y.argmax(-1)).mean()
 top_5_err = lambda m,y,*xs: 1 - jnp.any(y.argmax(-1, keepdims=True) == jnp.argsort(m(*xs,train=False), axis=-1)[:,-5:], axis=-1).mean()
 
-# Intersection over union for all segmented classes, specific to Cityscapes
-def mean_iou_err(model, y, *xs):
-    n_classes = 20
-    preds = model(*xs, train=False).argmax(-1).reshape(-1)
-    y = y.argmax(-1).reshape(-1)
-    conf_mat = jnp.bincount(y*n_classes+preds, length=n_classes**2)
-    conf_mat = conf_mat.reshape(n_classes, n_classes)[1:, 1:]
-    intersection = jnp.diag(conf_mat)
-    union = conf_mat.sum(0) + conf_mat.sum(1) - intersection
+def miou(logits, y, max_fn=partial(jax.nn.softmax, axis=-1), ignore_index:int|None=0):
+    """`logits` and `y` should have shape (batch, *, n_classes)"""
+    b, *_, c = logits.shape
+    logits = logits.reshape((b, -1, c))
+    y = y.reshape((b, -1, c))
+
+    if ignore_index is not None:
+        mask = jnp.any(y != jnp.eye(c)[ignore_index], axis=-1, keepdims=True)
+        logits = logits * mask
+        y = y * mask
+    
+    y_pred = max_fn(logits)
+    y = max_fn(y)
+
+    intersection = jnp.sum(y_pred * y, axis=1)
+    union = jnp.sum(y_pred + y, axis=1) - intersection + 1e-6
     iou = intersection / union
-    return 1 - jnp.nanmean(iou)
+
+    return iou.mean()
 
 # Client drift in function space, by comparing logits to avg logits
 def functional_drift(models, ds_test):
