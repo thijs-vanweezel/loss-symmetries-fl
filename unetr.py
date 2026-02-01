@@ -28,11 +28,13 @@ class PatchEmbeddingBlock(nnx.Module):
             padding="VALID",
             use_bias=True,
             rngs=rngs,
+            param_dtype=jnp.bfloat16,
+            dtype=jnp.bfloat16
         )
 
         initializer = jax.nn.initializers.truncated_normal(stddev=0.02)
         self.position_embeddings = nnx.Param(
-            initializer(rngs.params(), (1, n_patches, hidden_size), jnp.float32)
+            initializer(rngs.params(), (1, n_patches, hidden_size), jnp.bfloat16)
         )
         self.dropout = nnx.Dropout(dropout_rate, rngs=rngs)
 
@@ -58,10 +60,10 @@ class MLPBlock(nnx.Sequential):
         rngs: nnx.Rngs = nnx.Rngs(0),
     ):
         layers = [
-            nnx.Linear(hidden_size, mlp_dim, rngs=rngs),
+            nnx.Linear(hidden_size, mlp_dim, rngs=rngs, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16),
             activation_layer,
             nnx.Dropout(dropout_rate, rngs=rngs),
-            nnx.Linear(mlp_dim, hidden_size, rngs=rngs),
+            nnx.Linear(mlp_dim, hidden_size, rngs=rngs, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16),
             nnx.Dropout(dropout_rate, rngs=rngs),
         ]
         super().__init__(*layers)
@@ -89,6 +91,8 @@ class ViTEncoderBlock(nnx.Module):
             broadcast_dropout=False,
             decode=False,
             rngs=rngs,
+            param_dtype=jnp.bfloat16,
+            dtype=jnp.bfloat16
         )
         self.norm2 = nnx.LayerNorm(hidden_size, rngs=rngs)
 
@@ -178,6 +182,8 @@ class Conv2dNormActivation(nnx.Sequential):
                 feature_group_count=groups,
                 use_bias=bias,
                 rngs=rngs,
+                param_dtype=jnp.bfloat16,
+                dtype=jnp.bfloat16
             )
         ]
 
@@ -302,6 +308,8 @@ class UnetrPrUpBlock(nnx.Module):
             strides=(upsample_stride, upsample_stride),
             padding="VALID",
             rngs=rngs,
+            dtype=jnp.bfloat16,
+            param_dtype=jnp.bfloat16
         )
         self.blocks = [
             nnx.Sequential(
@@ -311,6 +319,8 @@ class UnetrPrUpBlock(nnx.Module):
                     kernel_size=(upsample_kernel_size, upsample_kernel_size),
                     strides=(upsample_stride, upsample_stride),
                     rngs=rngs,
+                    dtype=jnp.bfloat16,
+                    param_dtype=jnp.bfloat16
                 ),
                 UnetResBlock(
                     in_channels=out_channels,
@@ -355,6 +365,8 @@ class UnetrUpBlock(nnx.Module):
             strides=(upsample_stride, upsample_stride),
             padding="VALID",
             rngs=rngs,
+            dtype=jnp.bfloat16,
+            param_dtype=jnp.bfloat16
         )
         self.conv_block = UnetResBlock(
             out_channels + out_channels,
@@ -487,6 +499,8 @@ class UNETR(nnx.Module):
             padding="VALID",
             use_bias=True,
             rngs=rngs,
+            dtype=jnp.bfloat16,
+            param_dtype=jnp.bfloat16
         )
 
         self.proj_axes = (0, 1, 2, 3)
