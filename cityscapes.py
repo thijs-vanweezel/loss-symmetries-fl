@@ -6,7 +6,7 @@ from data import fetch_data
 from utils import miou
 from jax import numpy as jnp
 from flax import nnx
-from functools import partial, reduce
+from functools import reduce
 
 # Configuration
 n_clients = 1
@@ -14,7 +14,7 @@ asymkwargs = {}
 
 # Initialize model
 model = UNETR(20, img_size=224, **asymkwargs)
-lr = optax.warmup_exponential_decay_schedule(1e-4, .1, 2000, 1000, .9, end_value=1e-5)
+lr = optax.warmup_exponential_decay_schedule(1e-4, .5, 2000, 1000, .9, end_value=1e-5)
 opt = nnx.Optimizer(
     model,
     optax.adamw(lr),
@@ -29,7 +29,7 @@ ds_val = fetch_data(beta=1., dataset=2, partition="val", n_clients=n_clients, ba
 def loss_fn(model, model_g, y, *xs):
     logits = model(*xs, train=True)
     ce = optax.softmax_cross_entropy(logits, y, axis=-1).mean()
-    miou_err = 1 - miou(logits, y)
+    miou_err = 1. - miou(jax.nn.softmax(logits, axis=-1), y)
     return ce + miou_err
 models, rounds = train(
     model,
@@ -48,18 +48,18 @@ model_g = nnx.merge(struct, state_g, rest)
 
 # Save client models
 state = nnx.state(models, ...)
-pickle.dump(state, open("models/cs_central_.pkl", "wb"))
+pickle.dump(state, open("models/cs_central.pkl", "wb"))
 
 # Evaluate aggregated model
 vval_fn = nnx.jit(nnx.vmap(
-    lambda model, y, *xs: miou(model(*xs, train=False), y, partial(jnp.argmax, axis=-1)), 
+    lambda model, y, *xs: miou(jax.nn.one_hot(jnp.argmax(model(*xs, train=False), axis=-1), y.shape[-1]), y), 
     in_axes=(None,0,0)))
 miou_g = reduce(lambda acc, batch: acc + vval_fn(model_g, *batch), ds_val, 0.) / len(ds_val)
 print("Global mIoU: ", miou_g.mean().item())
 
 # Evaluate client models separately
 vval_fn = nnx.jit(nnx.vmap(
-    lambda model, y, *xs: miou(model(*xs, train=False), y, partial(jnp.argmax, axis=-1))
+    lambda model, y, *xs: miou(jax.nn.one_hot(jnp.argmax(model(*xs, train=False), axis=-1), y.shape[-1]), y), 
     ))
 miou_l = reduce(lambda acc, batch: acc + vval_fn(models, *batch), ds_val, 0.) / len(ds_val)
 print("Local mIoU: ", miou_l.mean().item())
