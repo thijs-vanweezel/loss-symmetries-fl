@@ -51,25 +51,18 @@ def return_ce(omega):
 err_fn = lambda m,y,*xs: 1-(m(*xs,train=False).argmax(-1)==y.argmax(-1)).mean()
 top_5_err = lambda m,y,*xs: 1 - jnp.any(y.argmax(-1, keepdims=True) == jnp.argsort(m(*xs,train=False), axis=-1)[:,-5:], axis=-1).mean()
 
-def miou(logits, y, max_fn=partial(jax.nn.softmax, axis=-1), ignore_index:int|None=0):
-    """`logits` and `y` should have shape (batch, *, n_classes)"""
-    b, *_, c = logits.shape
-    logits = logits.reshape((b, -1, c))
+def miou(y_pred, y):
+    """`y_pred` and `y` should be one-hot encoded and have shape (batch, *, n_classes)"""
+    # Flatten image
+    b, *_, c = y_pred.shape
+    y_pred = y_pred.reshape((b, -1, c))
     y = y.reshape((b, -1, c))
-
-    if ignore_index is not None:
-        mask = jnp.any(y != jnp.eye(c)[ignore_index], axis=-1, keepdims=True)
-        logits = logits * mask
-        y = y * mask
-    
-    y_pred = max_fn(logits)
-    y = max_fn(y)
-
+    # Avoid double counting intersection and remove classes not present
     intersection = jnp.sum(y_pred * y, axis=1)
-    union = jnp.sum(y_pred + y, axis=1) - intersection + 1e-6
-    iou = intersection / union
-
-    return iou.mean()
+    union = jnp.sum(y_pred + y, axis=1) - intersection
+    iou = jnp.where(y.sum(axis=1)>0, intersection/union, jnp.nan)
+    # Avg over classes and batch
+    return jnp.nanmean(iou)
 
 # Client drift in function space, by comparing logits to avg logits
 def functional_drift(models, ds_test):
