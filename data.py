@@ -87,12 +87,15 @@ class ImageNet(Dataset):
         self.n_clients = n_clients
         self.n_classes = n_classes
         # Augmentations
-        self.val_augs = torchvision.transforms.Resize(224)
+        self.val_augs = torchvision.transforms.Compose([
+            torchvision.transforms.Resize(256),
+            torchvision.transforms.CenterCrop(224)
+        ])
         self.train_augs = torchvision.transforms.Compose([
-            torchvision.transforms.RandomAffine(degrees=(-15,15)),
             torchvision.transforms.RandomHorizontalFlip(),
             torchvision.transforms.Resize(256),
             torchvision.transforms.RandomCrop(224),
+            torchvision.transforms.RandomAffine(degrees=(-15,15)),
             torchvision.transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.1)
         ])
 
@@ -143,6 +146,15 @@ class CityScapes(Dataset):
         # Label mapping extracted from https://github.com/mcordts/cityscapesScripts/blob/master/cityscapesscripts/helpers/labels.py#L62
         # using `i=0; torch.tensor([0 if l.ignoreInEval else (i:=i+1) for l in labels])`
         self.conversion = torch.tensor([0,0,0,0,0,0,0,1,2,0,0,3,4,5,0,0,0,6,0,7,8,9,10,11,12,13,14,15,16,0,0,17,18,19,0])
+        # Deterministic val augs
+        self.xval_augs = torchvision.transforms.Compose([
+            torchvision.transforms.Resize(256),
+            torchvision.transforms.CenterCrop(224)
+        ])
+        self.yval_augs = torchvision.transforms.Compose([
+            torchvision.transforms.Resize(256, interpolation=torchvision.transforms.InterpolationMode.NEAREST, antialias=False),
+            torchvision.transforms.CenterCrop(224)
+        ])
 
     def __len__(self):
         # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
@@ -194,10 +206,9 @@ class CityScapes(Dataset):
             img, label = self.train_aug(img, label)
             self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
         else: 
-            img = torchvision.transforms.functional.resize(img, 224)
-            label = torchvision.transforms.functional.resize(label, 224, 
-                                                             interpolation=torchvision.transforms.InterpolationMode.NEAREST, 
-                                                             antialias=False)
+            img = self.xval_augs(img)
+            label = self.yval_augs(label)
+        # Change to HWC
         img = torch.permute(img, (1,2,0))
         label = torch.permute(label, (1,2,0))
         return label, img
