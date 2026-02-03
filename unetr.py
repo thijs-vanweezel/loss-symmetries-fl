@@ -3,6 +3,45 @@ from jax import numpy as jnp
 from flax import nnx
 import jax
 from typing import Callable
+from models import AsymConv, AsymLinear
+
+class AsymConvTranspose(AsymConv):
+    def __call__(self, inputs:jax.Array) -> jax.Array:
+        bias = self.bias
+        kernel = self.kernel
+        # Apply SyRe (before wasym to avoid biasing the masked weights)
+        if self.ssigma>0.:
+            if self.use_bias: bias = bias + self.randb * self.ssigma
+            kernel = kernel + self.randk * self.ssigma
+        # Order bias to counter permutation symmetry
+        if self.orderbias: bias = jnp.concatenate([
+            bias[0:1],
+            jnp.cumsum(jnp.exp(bias[1:])) + bias[0:1]
+        ])
+        # Apply w-asymmetry
+        if self.wasym:
+            kernel = kernel * self.wmask + (1-self.wmask) * self.randk * self.kappa
+        # Normalize kernel to unit norm per output neuron
+        if self.normweights:
+            norm = jnp.linalg.norm(kernel.reshape(-1, self.out_features), axis=0, keepdims=True)
+            kernel /= norm
+            if self.use_bias: bias /= norm.squeeze()
+        # Implementation directly copied from nnx.Conv
+        inputs, kernel, bias = self.promote_dtype(
+            (inputs, kernel, bias), dtype=self.dtype
+        )
+        y = jax.lax.conv_transpose(
+            inputs,
+            kernel,
+            self.maybe_broadcast(self.strides),
+            self.padding,
+            rhs_dilation=self.maybe_broadcast(self.kernel_dilation),
+            transpose_kernel=False,
+            precision=self.precision,
+        )
+        if self.use_bias:
+            y += bias.reshape((1,) * (y.ndim - bias.ndim) + bias.shape)
+        return y
 
 class PatchEmbeddingBlock(nnx.Module):
     """
@@ -20,7 +59,7 @@ class PatchEmbeddingBlock(nnx.Module):
         rngs: nnx.Rngs = nnx.Rngs(0),
     ):
         n_patches = (img_size // patch_size) ** 2
-        self.patch_embeddings = nnx.Conv(
+        self.patch_embeddings = AsymConv(
             in_channels,
             hidden_size,
             kernel_size=(patch_size, patch_size),
@@ -60,10 +99,10 @@ class MLPBlock(nnx.Sequential):
         rngs: nnx.Rngs = nnx.Rngs(0),
     ):
         layers = [
-            nnx.Linear(hidden_size, mlp_dim, rngs=rngs, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16),
+            AsymLinear(hidden_size, mlp_dim, rngs=rngs, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16),
             activation_layer,
             nnx.Dropout(dropout_rate, rngs=rngs),
-            nnx.Linear(mlp_dim, hidden_size, rngs=rngs, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16),
+            AsymLinear(mlp_dim, hidden_size, rngs=rngs, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16),
             nnx.Dropout(dropout_rate, rngs=rngs),
         ]
         super().__init__(*layers)
@@ -172,7 +211,7 @@ class Conv2dNormActivation(nnx.Sequential):
         padding = ((padding, padding), (padding, padding))
 
         layers = [
-            nnx.Conv(
+            AsymConv(
                 in_channels,
                 out_channels,
                 kernel_size=(kernel_size, kernel_size),
@@ -301,7 +340,7 @@ class UnetrPrUpBlock(nnx.Module):
         rngs: nnx.Rngs = nnx.Rngs(0),
     ):
         upsample_stride = upsample_kernel_size
-        self.transp_conv_init = nnx.ConvTranspose(
+        self.transp_conv_init = AsymConvTranspose(
             in_features=in_channels,
             out_features=out_channels,
             kernel_size=(upsample_kernel_size, upsample_kernel_size),
@@ -313,7 +352,7 @@ class UnetrPrUpBlock(nnx.Module):
         )
         self.blocks = [
             nnx.Sequential(
-                nnx.ConvTranspose(
+                AsymConvTranspose(
                     in_features=out_channels,
                     out_features=out_channels,
                     kernel_size=(upsample_kernel_size, upsample_kernel_size),
@@ -358,7 +397,7 @@ class UnetrUpBlock(nnx.Module):
         rngs: nnx.Rngs = nnx.Rngs(0),
     ) -> None:
         upsample_stride = upsample_kernel_size
-        self.transp_conv = nnx.ConvTranspose(
+        self.transp_conv = AsymConvTranspose(
             in_features=in_channels,
             out_features=out_channels,
             kernel_size=(upsample_kernel_size, upsample_kernel_size),
@@ -491,7 +530,7 @@ class UNETR(nnx.Module):
             rngs=rngs,
         )
 
-        self.out = nnx.Conv(
+        self.out = AsymConv(
             in_features=feature_size,
             out_features=out_channels,
             kernel_size=(1, 1),
