@@ -10,7 +10,7 @@ from functools import reduce
 
 # Configuration
 n_clients = 1
-asymkwargs = {}
+asymkwargs = {"key":jax.random.key(42)}
 
 # Initialize model
 model = UNETR(20, img_size=224, **asymkwargs)
