@@ -2,9 +2,8 @@ from flax import nnx
 from jax import numpy as jnp
 from itertools import chain, combinations
 from flax.nnx.nn.linear import _conv_dimension_numbers
-import jax, flax, sys, importlib
+import jax, flax, sys, importlib, warnings
 from functools import partial
-from packaging import version
 from ml_collections.config_dict import ConfigDict
 
 # Dimension expansion
@@ -100,6 +99,8 @@ def mask_conv_densest(kernel_size, in_channels, out_channels, **kwargs):
                 return mask
             mask = mask.at[tuple(cols_idx) + (out_channel_idx,)].set(0)
             out_channel_idx += 1
+    warnings.warn("Mask is identifiable")
+    return mask
 
 # W-Asymmetry implementation consistent with https://github.com/cptq/asymmetric-networks/blob/main/lmc/models/models_resnet.py#L22
 # And kernel normalization consistent with https://github.com/o-laurent/bayes_posterior_symmetry_exploration/blob/main/symmetries/scale_resnet.py#L166
