@@ -57,6 +57,7 @@ class PatchEmbeddingBlock(nnx.Module):
         dropout_rate: float = 0.0,
         *,
         rngs: nnx.Rngs = nnx.Rngs(0),
+        **asymkwargs
     ):
         n_patches = (img_size // patch_size) ** 2
         self.patch_embeddings = AsymConv(
@@ -68,7 +69,8 @@ class PatchEmbeddingBlock(nnx.Module):
             use_bias=True,
             rngs=rngs,
             param_dtype=jnp.bfloat16,
-            dtype=jnp.bfloat16
+            dtype=jnp.bfloat16,
+            **asymkwargs
         )
 
         initializer = jax.nn.initializers.truncated_normal(stddev=0.02)
@@ -97,12 +99,13 @@ class MLPBlock(nnx.Sequential):
         activation_layer: Callable = nnx.gelu,
         *,
         rngs: nnx.Rngs = nnx.Rngs(0),
+        **asymkwargs
     ):
         layers = [
-            AsymLinear(hidden_size, mlp_dim, rngs=rngs, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16),
+            AsymLinear(hidden_size, mlp_dim, rngs=rngs, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16, **asymkwargs),
             activation_layer,
             nnx.Dropout(dropout_rate, rngs=rngs),
-            AsymLinear(mlp_dim, hidden_size, rngs=rngs, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16),
+            AsymLinear(mlp_dim, hidden_size, rngs=rngs, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16, **asymkwargs),
             nnx.Dropout(dropout_rate, rngs=rngs),
         ]
         super().__init__(*layers)
@@ -120,8 +123,9 @@ class ViTEncoderBlock(nnx.Module):
         dropout_rate: float = 0.0,
         *,
         rngs: nnx.Rngs = nnx.Rngs(0),
+        **asymkwargs
     ) -> None:
-        self.mlp = MLPBlock(hidden_size, mlp_dim, dropout_rate, rngs=rngs)
+        self.mlp = MLPBlock(hidden_size, mlp_dim, dropout_rate, rngs=rngs, **asymkwargs)
         self.norm1 = nnx.LayerNorm(hidden_size, rngs=rngs)
         self.attn = nnx.MultiHeadAttention(
             num_heads=num_heads,
@@ -157,6 +161,7 @@ class ViT(nnx.Module):
         dropout_rate: float = 0.0,
         *,
         rngs: nnx.Rngs = nnx.Rngs(0),
+        **asymkwargs
     ):
         if hidden_size % num_heads != 0:
             raise ValueError("hidden_size should be divisible by num_heads.")
@@ -168,9 +173,10 @@ class ViT(nnx.Module):
             hidden_size=hidden_size,
             dropout_rate=dropout_rate,
             rngs=rngs,
+            **asymkwargs
         )
         self.blocks = [
-            ViTEncoderBlock(hidden_size, mlp_dim, num_heads, dropout_rate, rngs=rngs)
+            ViTEncoderBlock(hidden_size, mlp_dim, num_heads, dropout_rate, rngs=rngs, **asymkwargs)
             for i in range(num_layers)
         ]
         self.norm = nnx.LayerNorm(hidden_size, rngs=rngs)
@@ -198,6 +204,7 @@ class Conv2dNormActivation(nnx.Sequential):
         dilation: int = 1,
         bias: bool | None = None,
         rngs: nnx.Rngs = nnx.Rngs(0),
+        **asymkwargs
     ):
         self.out_channels = out_channels
 
@@ -222,7 +229,8 @@ class Conv2dNormActivation(nnx.Sequential):
                 use_bias=bias,
                 rngs=rngs,
                 param_dtype=jnp.bfloat16,
-                dtype=jnp.bfloat16
+                dtype=jnp.bfloat16,
+                **asymkwargs
             )
         ]
 
@@ -256,6 +264,7 @@ class UnetResBlock(nnx.Module):
         activation_layer: Callable = nnx.leaky_relu,
         *,
         rngs: nnx.Rngs = nnx.Rngs(0),
+        **asymkwargs
     ):
         self.conv_norm_act1 = Conv2dNormActivation(
             in_channels=in_channels,
@@ -265,6 +274,7 @@ class UnetResBlock(nnx.Module):
             norm_layer=norm_layer,
             activation_layer=activation_layer,
             rngs=rngs,
+            **asymkwargs
         )
         self.conv_norm2 = Conv2dNormActivation(
             in_channels=out_channels,
@@ -274,6 +284,7 @@ class UnetResBlock(nnx.Module):
             norm_layer=norm_layer,
             activation_layer=None,
             rngs=rngs,
+            **asymkwargs
         )
 
         self.downsample = (in_channels != out_channels) or (stride != 1)
@@ -286,6 +297,7 @@ class UnetResBlock(nnx.Module):
                 norm_layer=norm_layer,
                 activation_layer=None,
                 rngs=rngs,
+                **asymkwargs
             )
         self.act = activation_layer
 
@@ -309,6 +321,7 @@ class UnetrBasicBlock(nnx.Module):
         norm_layer: Callable[..., nnx.Module] = InstanceNorm,
         *,
         rngs: nnx.Rngs = nnx.Rngs(0),
+        **asymkwargs
     ):
         self.layer = UnetResBlock(
             in_channels=in_channels,
@@ -316,6 +329,8 @@ class UnetrBasicBlock(nnx.Module):
             kernel_size=kernel_size,
             stride=stride,
             norm_layer=norm_layer,
+            rngs=rngs,
+            **asymkwargs
         )
 
     def __call__(self, x: jax.Array) -> jax.Array:
@@ -338,6 +353,7 @@ class UnetrPrUpBlock(nnx.Module):
         norm_layer: Callable[..., nnx.Module] = InstanceNorm,
         *,
         rngs: nnx.Rngs = nnx.Rngs(0),
+        **asymkwargs
     ):
         upsample_stride = upsample_kernel_size
         self.transp_conv_init = AsymConvTranspose(
@@ -348,7 +364,8 @@ class UnetrPrUpBlock(nnx.Module):
             padding="VALID",
             rngs=rngs,
             dtype=jnp.bfloat16,
-            param_dtype=jnp.bfloat16
+            param_dtype=jnp.bfloat16,
+            **asymkwargs
         )
         self.blocks = [
             nnx.Sequential(
@@ -359,7 +376,8 @@ class UnetrPrUpBlock(nnx.Module):
                     strides=(upsample_stride, upsample_stride),
                     rngs=rngs,
                     dtype=jnp.bfloat16,
-                    param_dtype=jnp.bfloat16
+                    param_dtype=jnp.bfloat16,
+                    **asymkwargs
                 ),
                 UnetResBlock(
                     in_channels=out_channels,
@@ -368,9 +386,10 @@ class UnetrPrUpBlock(nnx.Module):
                     stride=stride,
                     norm_layer=norm_layer,
                     rngs=rngs,
+                    **asymkwargs
                 ),
             )
-            for i in range(num_layer)
+            for _ in range(num_layer)
         ]
 
     def __call__(self, x: jax.Array) -> jax.Array:
@@ -395,6 +414,7 @@ class UnetrUpBlock(nnx.Module):
         norm_layer: Callable[..., nnx.Module] = InstanceNorm,
         *,
         rngs: nnx.Rngs = nnx.Rngs(0),
+        **asymkwargs
     ) -> None:
         upsample_stride = upsample_kernel_size
         self.transp_conv = AsymConvTranspose(
@@ -405,7 +425,8 @@ class UnetrUpBlock(nnx.Module):
             padding="VALID",
             rngs=rngs,
             dtype=jnp.bfloat16,
-            param_dtype=jnp.bfloat16
+            param_dtype=jnp.bfloat16,
+            **asymkwargs
         )
         self.conv_block = UnetResBlock(
             out_channels + out_channels,
@@ -414,6 +435,7 @@ class UnetrUpBlock(nnx.Module):
             stride=1,
             norm_layer=norm_layer,
             rngs=rngs,
+            **asymkwargs
         )
 
     def __call__(self, x: jax.Array, skip: jax.Array) -> jax.Array:
@@ -439,6 +461,7 @@ class UNETR(nnx.Module):
         norm_layer: Callable[..., nnx.Module] = InstanceNorm,
         *,
         rngs: nnx.Rngs = nnx.Rngs(0),
+        **asymkwargs
     ):
         if hidden_size % num_heads != 0:
             raise ValueError("hidden_size should be divisible by num_heads.")
@@ -458,6 +481,7 @@ class UNETR(nnx.Module):
             num_heads=num_heads,
             dropout_rate=dropout_rate,
             rngs=rngs,
+            **asymkwargs
         )
         self.encoder1 = UnetrBasicBlock(
             in_channels=in_channels,
@@ -466,6 +490,7 @@ class UNETR(nnx.Module):
             stride=1,
             norm_layer=norm_layer,
             rngs=rngs,
+            **asymkwargs
         )
         self.encoder2 = UnetrPrUpBlock(
             in_channels=hidden_size,
@@ -476,6 +501,7 @@ class UNETR(nnx.Module):
             upsample_kernel_size=2,
             norm_layer=norm_layer,
             rngs=rngs,
+            **asymkwargs
         )
         self.encoder3 = UnetrPrUpBlock(
             in_channels=hidden_size,
@@ -486,6 +512,7 @@ class UNETR(nnx.Module):
             upsample_kernel_size=2,
             norm_layer=norm_layer,
             rngs=rngs,
+            **asymkwargs
         )
         self.encoder4 = UnetrPrUpBlock(
             in_channels=hidden_size,
@@ -496,6 +523,7 @@ class UNETR(nnx.Module):
             upsample_kernel_size=2,
             norm_layer=norm_layer,
             rngs=rngs,
+            **asymkwargs
         )
         self.decoder5 = UnetrUpBlock(
             in_channels=hidden_size,
@@ -504,6 +532,7 @@ class UNETR(nnx.Module):
             upsample_kernel_size=2,
             norm_layer=norm_layer,
             rngs=rngs,
+            **asymkwargs
         )
         self.decoder4 = UnetrUpBlock(
             in_channels=feature_size * 8,
@@ -512,6 +541,7 @@ class UNETR(nnx.Module):
             upsample_kernel_size=2,
             norm_layer=norm_layer,
             rngs=rngs,
+            **asymkwargs
         )
         self.decoder3 = UnetrUpBlock(
             in_channels=feature_size * 4,
@@ -520,6 +550,7 @@ class UNETR(nnx.Module):
             upsample_kernel_size=2,
             norm_layer=norm_layer,
             rngs=rngs,
+            **asymkwargs
         )
         self.decoder2 = UnetrUpBlock(
             in_channels=feature_size * 2,
@@ -528,6 +559,7 @@ class UNETR(nnx.Module):
             upsample_kernel_size=2,
             norm_layer=norm_layer,
             rngs=rngs,
+            **asymkwargs
         )
 
         self.out = AsymConv(
@@ -539,7 +571,8 @@ class UNETR(nnx.Module):
             use_bias=True,
             rngs=rngs,
             dtype=jnp.bfloat16,
-            param_dtype=jnp.bfloat16
+            param_dtype=jnp.bfloat16,
+            **asymkwargs
         )
 
         self.proj_axes = (0, 1, 2, 3)
