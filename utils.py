@@ -57,12 +57,14 @@ def miou(y_pred, y):
     b, *_, c = y_pred.shape
     y_pred = y_pred.reshape((b, -1, c))
     y = y.reshape((b, -1, c))
-    # Avoid double counting intersection and remove classes not present
+    # Intersection and union without double counting intersection
     intersection = jnp.sum(y_pred * y, axis=1)
     union = jnp.sum(y_pred + y, axis=1) - intersection
-    iou = jnp.where(y.sum(axis=1)>0, intersection/union, jnp.nan)
-    # Avg over classes and batch
-    return jnp.nanmean(iou)
+    # Set classes with no ground truth to 1 (~valid)
+    valid = jnp.sum(y, axis=1)>0
+    iou = jnp.where(valid, intersection/union, 1.)
+    # Avg over classes and batch, subtracting invalid ones
+    return (jnp.sum(iou) - jnp.sum(~valid)) / jnp.sum(valid)
 
 # Client drift in function space, by comparing logits to avg logits
 def functional_drift(models, ds_test):
