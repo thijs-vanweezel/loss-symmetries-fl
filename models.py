@@ -481,5 +481,3 @@ class ViTAutoEncoder(nnx.Module):
             # Interpolate image to new size
             x = jax.image.resize(x, (x.shape[0], *new_shape, x.shape[-1]), method="bilinear", precision=jax.lax.Precision.HIGHEST)
         return x
-
-from unetr import UNETR
