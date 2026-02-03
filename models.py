@@ -6,7 +6,6 @@ import jax, flax, sys, importlib
 from functools import partial
 from packaging import version
 from ml_collections.config_dict import ConfigDict
-from unetr import UNETR
 
 # Dimension expansion
 @jax.vmap
@@ -40,7 +39,7 @@ class AsymLinear(nnx.Linear):
     def __init__(self, in_features:int, out_features:int, key:jax.dtypes.prng_key, wasym:bool=False, 
                  kappa:float=1., sigma:float=0., orderbias:bool=False, normweights:bool=False, **kwargs):
         keys = jax.random.split(key, 4)
-        super().__init__(in_features, out_features, rngs=nnx.Rngs(keys[0]), use_bias=True, **kwargs)
+        super().__init__(in_features, out_features, rngs=kwargs.pop("rngs",nnx.Rngs(keys[0])), use_bias=True, **kwargs)
         # Check if asymmetry is to be applied
         self.ssigma = sigma
         self.wasym = bool(wasym)
@@ -108,7 +107,7 @@ class AsymConv(nnx.Conv):
     def __init__(self, in_features:int, out_features:int, kernel_size:tuple[int,...], key:jax.dtypes.prng_key, wasym:bool=False, 
                  kappa:float=1., sigma:float=0., orderbias:bool=False, normweights:bool=False, **kwargs):
         keys = jax.random.split(key, 4)
-        super().__init__(in_features, out_features, kernel_size, rngs=nnx.Rngs(keys[0]), **kwargs)
+        super().__init__(in_features, out_features, kernel_size, rngs=kwargs.pop("rngs", nnx.Rngs(keys[0])), **kwargs)
         # Check if asymmetry is to be applied
         self.ssigma = sigma
         self.wasym = bool(wasym)
@@ -481,3 +480,5 @@ class ViTAutoEncoder(nnx.Module):
             # Interpolate image to new size
             x = jax.image.resize(x, (x.shape[0], *new_shape, x.shape[-1]), method="bilinear", precision=jax.lax.Precision.HIGHEST)
         return x
+
+from unetr import UNETR
