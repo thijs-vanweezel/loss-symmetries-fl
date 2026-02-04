@@ -117,7 +117,7 @@ class ImageNet(Dataset):
         if self.partition=="train": img = self.train_augs(img)
         else: img = self.val_augs(img)
         # Change to HWC
-        img = torch.permute(img, (2, 0, 1))
+        img = torch.permute(img, (1,2,0))
         return label, img
 
 class CityScapes(Dataset):
@@ -203,15 +203,15 @@ class CityScapes(Dataset):
         indices = self.conversion[indices]
         # Apply augmentations
         if self.partition=="train": 
-            img, label = self.train_aug(img, label)
+            img, indices = self.train_aug(img, indices)
             self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
         else: 
             img = self.xval_augs(img)
-            label = self.yval_augs(label)
+            indices = self.yval_augs(indices)
         # Change to HWC
         img = torch.permute(img, (1,2,0))
-        label = torch.permute(label, (1,2,0))
-        return label, img
+        indices = torch.squeeze(indices)
+        return indices, img
 
 def jax_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
@@ -223,7 +223,7 @@ def jax_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray, 
     # Collect, convert, and concat
     labels, imgs, *auxs = zip(*batch)
     imgs = jnp.stack([jnp.asarray(img, dtype=jnp.float32) for img in imgs])
-    labels = jnp.stack([jnp.asarray(label, dtype=jnp.float32) for label in labels])
+    labels = jnp.stack([jnp.asarray(label) for label in labels])
     if gaze:=bool(auxs): auxs = jnp.stack([jnp.asarray(aux, dtype=jnp.float32) for aux in auxs[0]])
 
     # Feature skew, by drawing a portion of the samples from the same feature distribution
