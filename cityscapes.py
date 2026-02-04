@@ -1,7 +1,7 @@
 # Imports
 import jax, optax, pickle
 from fedflax import train
-from models import UNETR
+from unetr import UNETR
 from data import fetch_data
 from utils import miou
 from jax import numpy as jnp
@@ -51,6 +51,7 @@ state = nnx.state(models, ...)
 pickle.dump(state, open("models/cs_central.pkl", "wb"))
 
 # Evaluate aggregated model
+model_g.eval()
 vval_fn = nnx.jit(nnx.vmap(
     lambda model, y, *xs: miou(jax.nn.one_hot(jnp.argmax(model(*xs, train=False), axis=-1), y.shape[-1]), y), 
     in_axes=(None,0,0)))
@@ -58,6 +59,7 @@ miou_g = reduce(lambda acc, batch: acc + vval_fn(model_g, *batch), ds_val, 0.) /
 print("Global mIoU: ", miou_g.mean().item())
 
 # Evaluate client models separately
+models.eval()
 vval_fn = nnx.jit(nnx.vmap(
     lambda model, y, *xs: miou(jax.nn.one_hot(jnp.argmax(model(*xs, train=False), axis=-1), y.shape[-1]), y), 
     ))
