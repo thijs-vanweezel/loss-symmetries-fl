@@ -95,8 +95,7 @@ class ImageNet(Dataset):
             torchvision.transforms.RandomHorizontalFlip(),
             torchvision.transforms.Resize(256),
             torchvision.transforms.RandomCrop(224),
-            torchvision.transforms.RandomAffine(degrees=(-15,15)),
-            torchvision.transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.1)
+            torchvision.transforms.ColorJitter(brightness=0.1, contrast=0.1)
         ])
 
     def __len__(self):
