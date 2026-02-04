@@ -28,7 +28,7 @@ ds_val = fetch_data(beta=1., dataset=2, partition="val", n_clients=n_clients, ba
 # Train (fixed number of epochs since test data is not available)
 def loss_fn(model, model_g, y, *xs):
     logits = model(*xs, train=True)
-    ce = optax.softmax_cross_entropy(logits, y, axis=-1).mean()
+    ce = optax.softmax_cross_entropy_with_integer_labels(logits, y, axis=-1).mean()
     miou_err = 1. - miou(jax.nn.softmax(logits, axis=-1), y)
     return ce + miou_err
 models, rounds = train(
