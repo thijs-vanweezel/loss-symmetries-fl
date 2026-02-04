@@ -1,6 +1,7 @@
 def main():
     import jax
     import flax
+    import hashlib
     from unetr import UNETR
     import optax
     import orbax.checkpoint as ocp
@@ -9,7 +10,7 @@ def main():
     import cv2
     import numpy as np
     from PIL import Image
-    import time
+    import time, os
     import orbax.checkpoint as ocp
     import optax
     from typing import Callable
@@ -21,50 +22,42 @@ def main():
     import matplotlib.pyplot as plt
     from fedflax import train
 
-    class OxfordPetsDataset:
-        def __init__(self, path: Path):
-            assert path.exists(), path
-            self.path: Path = path
-            self.images = sorted((self.path / "images").glob("*.jpg"))
-            self.masks = [
-                self.path / "annotations" / "trimaps" / path.with_suffix(".png").name
-                for path in self.images
-            ]
-            assert len(self.images) == len(self.masks), (len(self.images), len(self.masks))
+    class CityScapes:
+        def __init__(self, path:str="./cityscapes/", partition:str="train"):
+            self.partition = partition
+            g = os.walk(os.path.join(path, "leftImg8bit", partition))
+            # Get location names
+            cities = next(g)[1]
+            # Dedicate a client to each city
+            # Assign sample paths to each client
+            self.data = []
+            for dirname, _, filelist in g:
+                # Assign to client
+                filelist = [os.path.join(dirname, filename) for filename in filelist]
+                self.data.extend(filelist)
+            # Shuffle so that samples are not ordered by city (note: deterministic)
+            self.data.sort(key=lambda x: hashlib.sha256(str(x).encode()).hexdigest())
+            # Misc attributes
+            # Label mapping extracted from https://github.com/mcordts/cityscapesScripts/blob/master/cityscapesscripts/helpers/labels.py#L62
+            # using `i=0; torch.tensor([0 if l.ignoreInEval else (i:=i+1) for l in labels])`
+            self.conversion = np.asarray([0,0,0,0,0,0,0,1,2,0,0,3,4,5,0,0,0,6,0,7,8,9,10,11,12,13,14,15,16,0,0,17,18,19,0])
 
-        def __len__(self) -> int:
-            return len(self.images)
+        def __len__(self):
+            return len(self.data)
 
-        def read_image_opencv(self, path: Path):
-            img = cv2.imread(str(path))
-            if img is not None:
-                return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-        def read_image_pillow(self, path: Path):
-            img = Image.open(str(path))
+        def __getitem__(self, idx):
+            # Load datum
+            filepath = self.data[idx]
+            # Load image
+            img = Image.open(filepath)
             img = img.convert("RGB")
-            return np.asarray(img)
-
-        def read_mask(self, path: Path):
-            mask = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
-            # mask has values: 1, 2, 3
-            # 1 - object mask
-            # 2 - background
-            # 3 - boundary
-            # Define mask as 0-based int values
-            mask = mask - 1
-            return mask.astype("uint8")
-
-        def __getitem__(self, index: int) -> dict[str, np.ndarray]:
-            img_path, mask_path = self.images[index], self.masks[index]
-            img = self.read_image_opencv(img_path)
-            if img is None:
-                # Fallback to Pillow if OpenCV fails to read an image
-                img = self.read_image_pillow(img_path)
-            mask = self.read_mask(mask_path)
-            return {"mask": mask, "image": img}
-
-
+            img = np.asarray(img) / 255.
+            # Load label image
+            labelpath = filepath.replace("leftImg8bit", "gtFine").replace(".png", "_labelIds.png")
+            indices = np.asarray(Image.open(labelpath), dtype=np.uint8)
+            indices = self.conversion[indices]
+            return {"mask": indices, "image": img}
+        
     class SubsetDataset:
         def __init__(self, dataset, indices: list[int]):
             # Check input indices values:
@@ -86,19 +79,13 @@ def main():
     # %%
     seed = 12
     train_split = 0.7
-    dataset_path = Path("oxford_pets")
+    dataset_path = Path("cityscapes")
 
-    dataset = OxfordPetsDataset(dataset_path)
+    dataset = CityScapes(dataset_path)
 
     rng = np.random.default_rng(seed=seed)
     le = len(dataset)
     data_indices = list(range(le))
-
-    # Let's remove few indices corresponding to corrupted images
-    # to avoid libjpeg warnings during the data loading
-    corrupted_data_indices = [3017, 3425]
-    for index in corrupted_data_indices:
-        data_indices.remove(index)
 
     random_indices = rng.permutation(data_indices)
 
@@ -140,7 +127,6 @@ def main():
         A.Normalize(),  # Normalize the image and cast to float
     ])
 
-
     # %% [markdown]
     # ### Data loaders
     # 
@@ -159,7 +145,6 @@ def main():
     # %%
     train_batch_size = 16
     val_batch_size = 16
-
 
     # Create an IndexSampler with no sharding for single-device computations
     train_sampler = grain.IndexSampler(
@@ -221,10 +206,8 @@ def main():
 
     # %%
     # We'll use a different number of heads to make a smaller model
-    model = UNETR(out_channels=3, num_heads=4, key=jax.random.key(42))
-    x = jnp.ones((4, 256, 256, 3))
-    y = model(x)
-    print(y.shape)
+    model = UNETR(out_channels=20, num_heads=4, key=jax.random.key(42))
+    y, x = next(iter(train_loader))
 
     # %% [markdown]
     # We can visualize and inspect the architecture on the implemented model using `nnx.display(model)`.
@@ -245,20 +228,6 @@ def main():
 
     # %%
     lr_schedule = optax.linear_schedule(learning_rate, 0.0, num_epochs * total_steps)
-
-    iterate_subsample = np.linspace(0, num_epochs * total_steps, 100)
-    plt.plot(
-        np.linspace(0, num_epochs, len(iterate_subsample)),
-        [lr_schedule(i) for i in iterate_subsample],
-        lw=3,
-    )
-    plt.title("Learning rate")
-    plt.xlabel("Epochs")
-    plt.ylabel("Learning rate")
-    plt.grid()
-    plt.xlim((0, num_epochs))
-    plt.show()
-
 
     optimizer = nnx.Optimizer(model, optax.adam(lr_schedule, momentum))
 
@@ -392,7 +361,7 @@ def main():
 
     # %%
     model.eval()
-    cm = ConfusionMatrix(num_classes=3)
+    cm = ConfusionMatrix(num_classes=20)
     for y, x in val_loader:
         logits = model(x)
         cm.update(y_pred=logits, y=y)
