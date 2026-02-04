@@ -116,9 +116,8 @@ class ImageNet(Dataset):
         # Apply augmentations
         if self.partition=="train": img = self.train_augs(img)
         else: img = self.val_augs(img)
-        img = img.swapaxes(0,2)
-        # One-hot encode labels
-        label = torch.eye(self.n_classes)[label]
+        # Change to HWC
+        img = torch.permute(img, (2, 0, 1))
         return label, img
 
 class CityScapes(Dataset):
@@ -202,9 +201,6 @@ class CityScapes(Dataset):
         labelpath = filepath.replace("leftImg8bit", "gtFine").replace(".png", "_labelIds.png")
         indices = torchvision.io.decode_image(labelpath).long()
         indices = self.conversion[indices]
-        # One-hot encode labels
-        label = torch.zeros((20,*indices.shape[1:]), dtype=torch.float32)
-        label = label.scatter(0, indices, 1.)
         # Apply augmentations
         if self.partition=="train": 
             img, label = self.train_aug(img, label)
