@@ -43,7 +43,7 @@ def cast(module_g, n):
     models = nnx.merge(struct, params_all)
     return models
 
-def train(model_g:nnx.State, opt:nnx.Optimizer, ds_train, ell, ds_val=None, local_epochs:int|str="early", ckpt_fp:str=None, n_clients=4, 
+def train(model_g:nnx.Module, opt:nnx.Optimizer, ds_train, ell, ds_val=None, local_epochs:int|str="early", ckpt_fp:str=None, n_clients=4, 
           max_patience:int=None, rounds:int|str="early", val_fn=None):
     """
     Federated training loop. 
@@ -95,6 +95,7 @@ def train(model_g:nnx.State, opt:nnx.Optimizer, ds_train, ell, ds_val=None, loca
             # Collect and save params for visualization
             if ckpt: save_model(models, f"{ckpt_fp}_{r}_{epoch}{ext}")
             # Iterate over batches
+            models.train()
             for batch, (y, *xs) in enumerate(bar := tqdm(ds_train, leave=False)):
                 # Create train step function if first iteration
                 if batch==0 and epoch==0 and r==0:
@@ -104,6 +105,7 @@ def train(model_g:nnx.State, opt:nnx.Optimizer, ds_train, ell, ds_val=None, loca
                 # Inform user
                 bar.set_description(f"Round {r}/{rounds}, epoch {epoch}/{local_epochs} (local validation score: {'N/A' if epoch==0 or local_epochs!='early' else val}, local batch loss: {loss.mean():.4f})")
             # Evaluate on local validation
+            models.eval()
             if local_epochs=="early":
                 val = reduce(lambda a, batch: a+local_val_fn(models, *batch).mean(), ds_val, 0.)
                 val /= len(ds_val)
