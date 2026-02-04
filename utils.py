@@ -38,12 +38,13 @@ def angle_err(model, y, *xs):
 # Classification loss including softmax layer over last dimension
 def return_ce(omega):
     def ell(model, model_g, y, *xs):
+        """`model(*xs)` should have shape (batch, ..., n_classes), whereas `y` is should have shape (batch,)"""
         prox = sum(jax.tree.map(
             lambda a, b: jnp.sum((a-b)**2), 
             jax.tree.leaves(nnx.state(model, nnx.Param)), 
             jax.tree.leaves(nnx.state(model_g, nnx.Param))
         ))
-        ce = optax.softmax_cross_entropy(model(*xs, train=True), y, axis=-1).mean()
+        ce = optax.softmax_cross_entropy_with_integer_labels(model(*xs, train=True), y, axis=-1).mean()
         return omega/2*prox + ce
     return ell
 
