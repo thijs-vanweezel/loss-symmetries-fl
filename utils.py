@@ -57,6 +57,7 @@ def miou(y_pred, y):
     # Flatten image
     b, *_, c = y_pred.shape
     y_pred = y_pred.reshape((b, -1, c))
+    y = nnx.one_hot(y, num_classes=c, axis=-1)
     y = y.reshape((b, -1, c))
     # Intersection and union without double counting intersection
     intersection = jnp.sum(y_pred * y, axis=1)
