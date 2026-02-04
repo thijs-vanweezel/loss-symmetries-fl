@@ -19,6 +19,7 @@ def main():
     import grain.python as grain    
     import albumentations as A
     import matplotlib.pyplot as plt
+    from fedflax import train
 
     class OxfordPetsDataset:
         def __init__(self, path: Path):
@@ -38,8 +39,6 @@ def main():
             img = cv2.imread(str(path))
             if img is not None:
                 return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            else:
-                None
 
         def read_image_pillow(self, path: Path):
             img = Image.open(str(path))
@@ -63,10 +62,7 @@ def main():
                 # Fallback to Pillow if OpenCV fails to read an image
                 img = self.read_image_pillow(img_path)
             mask = self.read_mask(mask_path)
-            return {
-                "image": img,
-                "mask": mask,
-            }
+            return {"mask": mask, "image": img}
 
 
     class SubsetDataset:
@@ -119,28 +115,6 @@ def main():
     print("Training dataset size:", len(train_dataset))
     print("Validation dataset size:", len(val_dataset))
 
-    # %% [markdown]
-    # To verify our work so far, let's display few training and validation images and masks:
-
-    # %%
-
-    def display_datapoint(datapoint, label=""):
-        img, mask = datapoint["image"], datapoint["mask"]
-        if img.dtype in (np.float32, ):
-            img = ((img - img.min()) / (img.max() - img.min()) * 255.0).astype(np.uint8)
-        fig, axs = plt.subplots(1, 3, figsize=(10, 10))
-        axs[0].set_title(f"Image{label}")
-        axs[0].imshow(img)
-        axs[1].set_title(f"Mask{label}")
-        axs[1].imshow(mask)
-        axs[2].set_title("Image + Mask")
-        axs[2].imshow(img)
-        axs[2].imshow(mask, alpha=0.5)
-
-
-
-    display_datapoint(train_dataset[0], label=" (train set)")
-    display_datapoint(val_dataset[0], label=" (val set)")
 
     # %% [markdown]
     # ### Data augmentations
@@ -166,17 +140,6 @@ def main():
         A.Normalize(),  # Normalize the image and cast to float
     ])
 
-    # %%
-    output = train_transforms(**train_dataset[0])
-    img, mask = output["image"], output["mask"]
-    print("Image array info:", img.dtype, img.shape, img.min(), img.mean(), img.max())
-    print("Mask array info:", mask.dtype, mask.shape, mask.min(), mask.max())
-
-    # %%
-    output = val_transforms(**val_dataset[0])
-    img, mask = output["image"], output["mask"]
-    print("Image array info:", img.dtype, img.shape, img.min(), img.mean(), img.max())
-    print("Mask array info:", mask.dtype, mask.shape, mask.min(), mask.max())
 
     # %% [markdown]
     # ### Data loaders
@@ -224,6 +187,7 @@ def main():
         operations=[
             DataAugs(train_transforms),
             grain.Batch(train_batch_size, drop_remainder=True),
+            grain.MapOperation(lambda batch: (batch["mask"][None], batch["image"][None]))
         ]
     )
 
@@ -236,6 +200,7 @@ def main():
         operations=[
             DataAugs(val_transforms),
             grain.Batch(val_batch_size),
+            grain.MapOperation(lambda batch: (batch["mask"], batch["image"]))
         ]
     )
 
@@ -248,45 +213,9 @@ def main():
         operations=[
             DataAugs(val_transforms),
             grain.Batch(val_batch_size),
+            grain.MapOperation(lambda batch: (batch["mask"], batch["image"]))
         ]
     )
-
-    # %%
-    train_batch = next(iter(train_loader))
-    val_batch = next(iter(val_loader))
-
-    # %%
-    print("Train images batch info:", type(train_batch["image"]), train_batch["image"].shape, train_batch["image"].dtype)
-    print("Train masks batch info:", type(train_batch["mask"]), train_batch["mask"].shape, train_batch["mask"].dtype)
-
-    # %% [markdown]
-    # Finally, let's display the training and validation data:
-
-    # %%
-    images, masks = train_batch["image"], train_batch["mask"]
-
-    for img, mask in zip(images[:3], masks[:3]):
-        display_datapoint({"image": img, "mask": mask}, label=" (augmented train set)")
-
-    # %%
-    images, masks = val_batch["image"], val_batch["mask"]
-
-    for img, mask in zip(images[:3], masks[:3]):
-        display_datapoint({"image": img, "mask": mask}, label=" (augmented validation set)")
-
-    # %% [markdown]
-    # ## Model for Image Segmentation
-    # 
-    # In this section we will implement the [UNETR](https://arxiv.org/abs/2103.10504) model from scratch using Flax NNX. The reference PyTorch implementation of this model can be found on the [MONAI Library GitHub repository](https://github.com/Project-MONAI/MONAI/blob/dev/monai/networks/nets/unetr.py).
-    # 
-    # The UNETR model utilizes a transformer as the encoder to learn sequence representations of the input and to capture the global multi-scale information, while also following the “U-shaped” network design like [UNet](https://arxiv.org/abs/1505.04597) model:
-    # ![image.png](https://github.com/jax-ml/jax-ai-stack/blob/main/docs/source/_static/images/unetr_architecture.png?raw=1)
-    # 
-    # The UNETR architecture on the image above is processing 3D inputs, but it can be easily adapted to 2D input.
-    # 
-    # The transformer encoder of UNETR is [Vision Transformer (ViT)](https://arxiv.org/abs/2010.11929). The feature maps returned by ViT have all the same spatial size: (H / 16, W / 16) and deconvolutions are used to upsample the feature maps. Finally, the feature maps are upsampled and concatenated up to the original image size.
-
-    # %%
 
 
 
@@ -362,7 +291,7 @@ def main():
         return 1.0 - intersection / union
 
 
-    def compute_losses_and_logits(model: nnx.Module, images: jax.Array, masks: jax.Array):
+    def compute_losses_and_logits(model: nnx.Module, model_g, masks: jax.Array, images: jax.Array):
         logits = model(images)
 
         xentropy_loss = optax.softmax_cross_entropy_with_integer_labels(
@@ -371,7 +300,7 @@ def main():
 
         jacc_loss = compute_softmax_jaccard_loss(logits=logits, masks=masks)
         loss = xentropy_loss + jacc_loss
-        return loss, (xentropy_loss, jacc_loss, logits)
+        return loss
 
     # %% [markdown]
     # Now, we will implement a confusion matrix metric derived from [`nnx.Metric`](https://flax.readthedocs.io/en/latest/api_reference/flax.nnx/training/metrics.html#flax.nnx.metrics.Metric). A confusion matrix will help us to compute the Intersection-Over-Union (IoU) metric per class and on average. Finally, we can also compute the accuracy metric using the confusion matrix.
@@ -454,220 +383,27 @@ def main():
     def compute_accuracy(cm: jax.Array) -> jax.Array:
         return jnp.diag(cm).sum() / (cm.sum() + 1e-15)
 
-    # %% [markdown]
-    # Next, let's define training and evaluation steps:
-
-    # %%
-    @nnx.jit
-    def train_step(
-        model: nnx.Module, optimizer: nnx.Optimizer, batch: dict[str, np.ndarray]
-    ):
-        # Convert numpy arrays to jax.Array on GPU
-        images = jnp.array(batch["image"])
-        masks = jnp.array(batch["mask"], dtype=jnp.int32)
-
-        grad_fn = nnx.value_and_grad(compute_losses_and_logits, has_aux=True)
-        (loss, (xentropy_loss, jacc_loss, logits)), grads = grad_fn(model, images, masks)
-
-        optimizer.update(grads)  # In-place updates.
-
-        return loss, xentropy_loss, jacc_loss
-
-    # %%
-    @nnx.jit
-    def eval_step(
-        model: nnx.Module, batch: dict[str, np.ndarray], eval_metrics: nnx.MultiMetric
-    ):
-        # Convert numpy arrays to jax.Array on GPU
-        images = jnp.array(batch["image"])
-        masks = jnp.array(batch["mask"], dtype=jnp.int32)
-        loss, (_, _, logits) = compute_losses_and_logits(model, images, masks)
-
-        eval_metrics.update(
-            total_loss=loss,
-            y_pred=logits,
-            y=masks,
-        )  # In-place updates.
+    model, _ = train(model, optimizer, train_loader, compute_losses_and_logits, local_epochs=num_epochs, rounds=1, n_clients=1)
+    struct, params, rest = nnx.split(model, (nnx.BatchStat, nnx.Param), ...)
+    model = nnx.merge(struct, jax.tree.map(lambda p: p.mean(0), params), rest)
 
     # %% [markdown]
-    # We will also define metrics we want to compute during the evaluation phase: total loss and confusion matrix computed on training and validation datasets. Finally, we define helper objects to store the metrics history.
-    # Metrics like IoU per class, mean IoU and accuracy will be computed using the confusion matrix in the evaluation code.
-
-    # %%
-    eval_metrics = nnx.MultiMetric(
-        total_loss=nnx.metrics.Average('total_loss'),
-        confusion_matrix=ConfusionMatrix(num_classes=3),
-    )
-
-
-    eval_metrics_history = {
-        "train_total_loss": [],
-        "train_IoU": [],
-        "train_mean_IoU": [],
-        "train_accuracy": [],
-
-        "val_total_loss": [],
-        "val_IoU": [],
-        "val_mean_IoU": [],
-        "val_accuracy": [],
-    }
-
-    # %% [markdown]
-    # Let us define the training and evaluation logic. We define as well a checkpoint manager to store two best models defined by validation mean IoU metric value.
-
-    # %%
-
-
-
-    def train_one_epoch(epoch):
-        start_time = time.time()
-
-        model.train()  # Set model to the training mode: e.g. update batch statistics
-        for step, batch in enumerate(train_loader):
-            total_loss, xentropy_loss, jaccard_loss = train_step(model, optimizer, batch)
-
-            print(
-                f"\r[train] epoch: {epoch + 1}/{num_epochs}, iteration: {step}/{total_steps}, "
-                f"total loss: {total_loss.item():.4f} ",
-                f"xentropy loss: {xentropy_loss.item():.4f} ",
-                f"jaccard loss: {jaccard_loss.item():.4f} ",
-                end="")
-            print("\r", end="")
-
-        elapsed = time.time() - start_time
-        print(
-            f"\n[train] epoch: {epoch + 1}/{num_epochs}, elapsed time: {elapsed:.2f} seconds"
-        )
-
-
-    def evaluate_model(epoch):
-        start_time = time.time()
-
-        # Compute the metrics on the train and val sets after each training epoch.
-        model.eval()  # Set model to evaluation model: e.g. use stored batch statistics
-
-        for tag, eval_loader in [("train", train_eval_loader), ("val", val_loader)]:
-            eval_metrics.reset()  # Reset the eval metrics
-            for val_batch in eval_loader:
-                eval_step(model, val_batch, eval_metrics)
-
-            for metric, value in eval_metrics.compute().items():
-                if metric == "confusion_matrix":
-                    eval_metrics_history[f"{tag}_IoU"].append(
-                        compute_iou(value)
-                    )
-                    eval_metrics_history[f"{tag}_mean_IoU"].append(
-                        compute_mean_iou(value)
-                    )
-                    eval_metrics_history[f"{tag}_accuracy"].append(
-                        compute_accuracy(value)
-                    )
-                else:
-                    eval_metrics_history[f'{tag}_{metric}'].append(value)
-
-            print(
-                f"[{tag}] epoch: {epoch + 1}/{num_epochs} "
-                f"\n - total loss: {eval_metrics_history[f'{tag}_total_loss'][-1]:0.4f} "
-                f"\n - IoU per class: {eval_metrics_history[f'{tag}_IoU'][-1].tolist()} "
-                f"\n - Mean IoU: {eval_metrics_history[f'{tag}_mean_IoU'][-1]:0.4f} "
-                f"\n - Accuracy: {eval_metrics_history[f'{tag}_accuracy'][-1]:0.4f} "
-                "\n"
-            )
-
-        elapsed = time.time() - start_time
-        print(
-            f"[evaluation] epoch: {epoch + 1}/{num_epochs}, elapsed time: {elapsed:.2f} seconds"
-        )
-
-        return eval_metrics_history['val_mean_IoU'][-1]
-
-
-    path = ocp.test_utils.erase_and_create_empty("/tmp/output-oxford-model/")
-    options = ocp.CheckpointManagerOptions(max_to_keep=2)
-    mngr = ocp.CheckpointManager(path, options=options)
-
-
-    def save_model(epoch):
-        state = nnx.state(model)
-        # We should convert PRNGKeyArray to the old format for Dropout layers
-        # https://github.com/google/flax/issues/4231
-        def get_key_data(x):
-            if isinstance(x, jax._src.prng.PRNGKeyArray):
-                if isinstance(x.dtype, jax._src.prng.KeyTy):
-                    return jax.random.key_data(x)
-            return x
-
-        serializable_state = jax.tree.map(get_key_data, state)
-        mngr.save(epoch, args=ocp.args.StandardSave(serializable_state))
-        mngr.wait_until_finished()
-
-    # %% [markdown]
-    # Now we can start the training. It can take around 45 minutes using a single GPU and use 19GB of GPU memory.
-
-    best_val_mean_iou = 0.0
-    for epoch in range(num_epochs):
-        train_one_epoch(epoch)
-        if (epoch % 3 == 0) or (epoch == num_epochs - 1):
-            val_mean_iou = evaluate_model(epoch)
-            if val_mean_iou > best_val_mean_iou:
-                save_model(epoch)
-                best_val_mean_iou = val_mean_iou
-
-    # %% [markdown]
-    # We can check the saved models:
-
-    # %% [markdown]
-    # and visualize collected metrics:
-
-    # %%
-    epochs = [i for i in range(num_epochs) if (i % 3 == 0) or (i == num_epochs - 1)]
-
-    plt.plot(epochs, eval_metrics_history["train_total_loss"], label="Loss value on training set")
-    plt.plot(epochs, eval_metrics_history["val_total_loss"], label="Loss value on validation set")
-    plt.legend()
-
-    # %%
-    plt.plot(epochs, eval_metrics_history["train_mean_IoU"], label="Mean IoU on training set")
-    plt.plot(epochs, eval_metrics_history["val_mean_IoU"], label="Mean IoU on validation set")
-    plt.legend()
-
-    # %% [markdown]
-    # Next, we will visualize model predictions on validation data:
+    # Next, we will vevaluate
 
     # %%
     model.eval()
-    val_batch = next(iter(val_loader))
-
-    # %%
-    images, masks = val_batch["image"], val_batch["mask"]
-    preds = model(images)
-    preds = jnp.argmax(preds, axis=-1)
-
-    # %%
-    def display_image_mask_pred(img, mask, pred, label=""):
-        if img.dtype in (np.float32, ):
-            img = ((img - img.min()) / (img.max() - img.min()) * 255.0).astype(np.uint8)
-        fig, axs = plt.subplots(1, 5, figsize=(15, 10))
-        axs[0].set_title(f"Image{label}")
-        axs[0].imshow(img)
-        axs[1].set_title(f"Mask{label}")
-        axs[1].imshow(mask)
-        axs[2].set_title("Image + Mask")
-        axs[2].imshow(img)
-        axs[2].imshow(mask, alpha=0.5)
-        axs[3].set_title(f"Pred{label}")
-        axs[3].imshow(pred)
-        axs[4].set_title("Image + Pred")
-        axs[4].imshow(img)
-        axs[4].imshow(pred, alpha=0.5)
-
-    # %%
-    for img, mask, pred in zip(images[:4], masks[:4], preds[:4]):
-        display_image_mask_pred(img, mask, pred, label=" (validation set)")
-
-    # %% [markdown]
-    # We can see that model can roughly predict the shape of the animal and the background and struggles with predicting the boundary. Carefully choosing hyperparameters we may achieve better results.
-
+    cm = ConfusionMatrix(num_classes=3)
+    for y, x in val_loader:
+        logits = model(x)
+        cm.update(y_pred=logits, y=y)
+    confmat = cm.compute()
+    iou = compute_iou(confmat)
+    miou = compute_mean_iou(confmat)
+    acc = compute_accuracy(confmat)
+    print("Confusion matrix:\n", confmat)
+    print("IoU per class:", iou)
+    print("Mean IoU:", miou)
+    print("Accuracy:", acc)
 
 if __name__ == "__main__":
     main()
