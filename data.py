@@ -3,6 +3,7 @@ import os, torch, shutil, torchvision, optax, hashlib
 from torch.utils.data import Dataset, DataLoader, default_collate
 from jax import numpy as jnp
 from functools import partial
+import PIL
 
 def preprocess(original_path="MPIIGaze/MPIIGaze/Data/Normalized", new_path="MPIIGaze_preprocessed/"):
     """Run once."""
@@ -89,13 +90,16 @@ class ImageNet(Dataset):
         # Augmentations
         self.val_augs = torchvision.transforms.Compose([
             torchvision.transforms.Resize(256),
-            torchvision.transforms.CenterCrop(224)
+            torchvision.transforms.CenterCrop(224),
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
         self.train_augs = torchvision.transforms.Compose([
             torchvision.transforms.RandomHorizontalFlip(),
-            torchvision.transforms.Resize(256),
-            torchvision.transforms.RandomCrop(224),
-            torchvision.transforms.ColorJitter(brightness=0.1, contrast=0.1)
+            torchvision.transforms.RandomResizedCrop(224, scale=(0.08, 1.0)),
+            torchvision.transforms.ColorJitter(brightness=0.1, contrast=0.1),
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
     def __len__(self):
@@ -108,7 +112,8 @@ class ImageNet(Dataset):
         i = idx // self.n_clients
         label, filepath = self.data[c][i]
         # Load image
-        img = torchvision.io.decode_image(filepath, mode="RGB").float() / 255.
+        img = PIL.Image.open(filepath).convert("RGB")
+        # Apply augmentations
         if self.partition=="train": img = self.train_augs(img)
         else: img = self.val_augs(img)
         img = img.swapaxes(0,2)
