@@ -21,8 +21,8 @@ def return_train_step(ell, n_inputs):
 
 # Get updates, i.e., difference between initial model and locally converged models
 def get_updates(model_g, models):
-    params = nnx.split(models, (nnx.Param, nnx.BatchStat), ...)[1]
-    params_g = nnx.split(model_g, (nnx.Param, nnx.BatchStat), ...)[1]
+    params = nnx.state(models, (nnx.Param, nnx.BatchStat))
+    params_g = nnx.state(model_g, (nnx.Param, nnx.BatchStat))
     return jax.tree.map(lambda pg, p: p-pg, params_g, params) # state of length n_layers with arrays of shape (n_clients, *layer_shape)
 
 def aggregate(model_g, updates):
