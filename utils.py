@@ -49,8 +49,8 @@ def return_ce(omega):
     return ell
 
 # Inverse accuracy function for classification validation
-err_fn = lambda m,y,*xs: 1-(m(*xs,train=False).argmax(-1)==y.argmax(-1)).mean()
-top_5_err = lambda m,y,*xs: 1 - jnp.any(y.argmax(-1, keepdims=True) == jnp.argsort(m(*xs,train=False), axis=-1)[:,-5:], axis=-1).mean()
+err_fn = lambda m,y,*xs: 1-(m(*xs,train=False).argmax(-1)==y).mean()
+top_5_err = lambda m,y,*xs: 1 - jnp.any(jnp.expand_dims(y, -1) == jnp.argsort(m(*xs,train=False), axis=-1)[:,-5:], axis=-1).mean()
 
 def miou(y_pred, y):
     """`y_pred` and `y` should be one-hot encoded and have shape (batch, *, n_classes)"""
