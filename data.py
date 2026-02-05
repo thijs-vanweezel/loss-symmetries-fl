@@ -4,6 +4,7 @@ from torch.utils.data import Dataset, DataLoader, default_collate
 from jax import numpy as jnp
 from functools import partial
 import PIL
+from collections import defaultdict
 
 def preprocess(original_path="MPIIGaze/MPIIGaze/Data/Normalized", new_path="MPIIGaze_preprocessed/"):
     """Run once."""
@@ -212,6 +213,84 @@ class CityScapes(Dataset):
         img = torch.permute(img, (1,2,0))
         indices = torch.squeeze(indices)
         return indices, img
+
+class OxfordPets(Dataset):
+    def __init__(self, path:str="oxford_pets", partition="train", seed=None, n_clients=4):
+        self.n_clients = n_clients
+        if seed is not None: self.seed = seed 
+        else:
+            self.seed = torch.Generator()
+            self.seed.manual_seed(42)
+        self.partition = partition
+        # Load filenames and race
+        with open(os.path.join(path, "annotations", "list.txt")) as f:
+            lines = f.readlines()[6:]
+        # Store in dict per race
+        classes_per_client = {str(i):i%n_clients for i in range(1,38)}
+        self.files = defaultdict(list)
+        for line in lines:
+            filename, classname, *_ = line.strip().split(" ")
+            client = classes_per_client[classname]
+            self.files[client].append((os.path.join(path, "images", filename+".jpg"), os.path.join(path, "annotations", "trimaps", filename+".png")))
+        # Deterministic val augs
+        self.xval_augs = torchvision.transforms.Compose([
+            torchvision.transforms.Resize(256),
+            torchvision.transforms.CenterCrop(224),
+            torchvision.transforms.ToTensor()
+        ])
+        self.yval_augs = torchvision.transforms.Compose([
+            torchvision.transforms.Resize(256, interpolation=torchvision.transforms.InterpolationMode.NEAREST, antialias=False),
+            torchvision.transforms.CenterCrop(224),
+        ])
+
+    def train_aug(self, img, mask):
+        """Deterministic train augmentations"""
+        # Flip
+        if torch.bernoulli(torch.tensor(.5), generator=self.seed).item():
+            img = torchvision.transforms.functional.hflip(img) 
+            mask = torchvision.transforms.functional.hflip(mask)
+        # Resize
+        img = torchvision.transforms.functional.resize(img, 256)
+        mask = torchvision.transforms.functional.resize(mask, 256, 
+                                                         interpolation=torchvision.transforms.InterpolationMode.NEAREST, 
+                                                         antialias=False)
+        # Crop
+        i = torch.randint(0, img.shape[1]-224+1, (), generator=self.seed).item()
+        j = torch.randint(0, img.shape[2]-224+1, (), generator=self.seed).item()
+        img = torchvision.transforms.functional.crop(img, i, j, 224, 224)
+        mask = torchvision.transforms.functional.crop(mask, i, j, 224, 224)
+        # Rotate
+        angle = torch.empty(()).uniform_(-15, 15, generator=self.seed).item()
+        img = torchvision.transforms.functional.affine(img, angle, (0,0), 1., 0)
+        mask = torchvision.transforms.functional.affine(mask, angle, (0,0), 1., 0)
+        # Color jitter
+        brightness = torch.empty(()).uniform_(0.8, 1.2, generator=self.seed).item()
+        contrast = torch.empty(()).uniform_(0.8, 1.2, generator=self.seed).item()
+        img = torchvision.transforms.functional.adjust_brightness(img, brightness)
+        img = torchvision.transforms.functional.adjust_contrast(img, contrast)
+        return img, mask
+
+    def __len__(self):
+        # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
+        return min([len(files) for files in self.files.values()])*self.n_clients
+
+    def __getitem__(self, idx: int):
+        client = idx % len(self.files)
+        i = idx // len(self.files)
+        img_path, mask_path = self.files[client][i]
+        img = torchvision.io.decode_image(img_path, mode="RGB").float() / 255.
+        mask = torchvision.io.decode_image(mask_path).long() - 1
+        # Apply augmentations
+        if self.partition=="train": 
+            img, mask = self.train_aug(img, mask)
+            self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
+        else:
+            img = self.xval_augs(img)
+            mask = self.yval_augs(mask)
+        # Change to HWC
+        img = torch.permute(img, (1,2,0))
+        mask = torch.squeeze(mask)
+        return mask, img
 
 def jax_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
