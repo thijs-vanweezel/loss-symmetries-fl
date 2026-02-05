@@ -226,12 +226,14 @@ class OxfordPets(Dataset):
         with open(os.path.join(path, "annotations", "list.txt")) as f:
             lines = f.readlines()[6:]
         # Store in dict per race
-        classes_per_client = {str(i):i%n_clients for i in range(1,38)}
+        classes_per_client = {i+1:i%n_clients for i in range(37)}
         self.files = defaultdict(list)
         for line in lines:
-            filename, classname, *_ = line.strip().split(" ")
-            client = classes_per_client[classname]
+            filename, classint, *_ = line.strip().split(" ")
+            client = classes_per_client[classint:=int(classint)]
             self.files[client].append((os.path.join(path, "images", filename+".jpg"), os.path.join(path, "annotations", "trimaps", filename+".png")))
+        for client in self.files:
+            self.files[client].sort(key=lambda x: hashlib.sha256(str(x).encode()).hexdigest())
         # Deterministic val augs
         self.xval_augs = torchvision.transforms.Compose([
             torchvision.transforms.Resize(256),
