@@ -242,17 +242,6 @@ class Conv2dNormActivation(nnx.Sequential):
 
         super().__init__(*layers)
 
-class InstanceNorm(nnx.GroupNorm):
-    def __init__(self, num_features, **kwargs):
-        num_groups, group_size = num_features, None
-        super().__init__(
-            num_features,
-            num_groups=num_groups,
-            group_size=group_size,
-            **kwargs,
-        )
-
-
 class UnetResBlock(nnx.Module):
     def __init__(
         self,
@@ -260,7 +249,7 @@ class UnetResBlock(nnx.Module):
         out_channels: int,
         kernel_size: int,
         stride: int,
-        norm_layer: Callable[..., nnx.Module] = InstanceNorm,
+        norm_layer: Callable[..., nnx.Module] = nnx.BatchNorm,
         activation_layer: Callable = nnx.leaky_relu,
         *,
         rngs: nnx.Rngs = nnx.Rngs(0),
@@ -318,7 +307,7 @@ class UnetrBasicBlock(nnx.Module):
         out_channels: int,
         kernel_size: int,
         stride: int,
-        norm_layer: Callable[..., nnx.Module] = InstanceNorm,
+        norm_layer: Callable[..., nnx.Module] = nnx.BatchNorm,
         *,
         rngs: nnx.Rngs = nnx.Rngs(0),
         **asymkwargs
@@ -350,7 +339,7 @@ class UnetrPrUpBlock(nnx.Module):
         kernel_size: int,
         stride: int,
         upsample_kernel_size: int = 2,  # convolution kernel size for transposed convolution layers.
-        norm_layer: Callable[..., nnx.Module] = InstanceNorm,
+        norm_layer: Callable[..., nnx.Module] = nnx.BatchNorm,
         *,
         rngs: nnx.Rngs = nnx.Rngs(0),
         **asymkwargs
@@ -411,7 +400,7 @@ class UnetrUpBlock(nnx.Module):
         out_channels: int,
         kernel_size: int,
         upsample_kernel_size: int = 2,  # convolution kernel size for transposed convolution layers.
-        norm_layer: Callable[..., nnx.Module] = InstanceNorm,
+        norm_layer: Callable[..., nnx.Module] = nnx.BatchNorm,
         *,
         rngs: nnx.Rngs = nnx.Rngs(0),
         **asymkwargs
@@ -458,7 +447,7 @@ class UNETR(nnx.Module):
         mlp_dim: int = 3072,
         num_heads: int = 12,
         dropout_rate: float = 0.0,
-        norm_layer: Callable[..., nnx.Module] = InstanceNorm,
+        norm_layer: Callable[..., nnx.Module] = nnx.BatchNorm,
         *,
         rngs: nnx.Rngs = nnx.Rngs(0),
         **asymkwargs
