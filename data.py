@@ -238,7 +238,6 @@ class OxfordPets(Dataset):
         self.xval_augs = torchvision.transforms.Compose([
             torchvision.transforms.Resize(256),
             torchvision.transforms.CenterCrop(224),
-            torchvision.transforms.ToTensor()
         ])
         self.yval_augs = torchvision.transforms.Compose([
             torchvision.transforms.Resize(256, interpolation=torchvision.transforms.InterpolationMode.NEAREST, antialias=False),
@@ -293,6 +292,55 @@ class OxfordPets(Dataset):
         img = torch.permute(img, (1,2,0))
         mask = torch.squeeze(mask)
         return mask, img
+
+class CelebA(Dataset):
+    def __init__(self, path:str="celeba", partition="train", n_clients=4):
+        self.n_clients = n_clients
+        self.partition = partition
+        # Load filenames and race
+        with open(os.path.join(path, "identity_CelebA.txt")) as f:
+            persons = f.readlines()
+        with open(os.path.join(path, "list_attr_celeba.txt")) as f:
+            attributes = f.readlines()[2:]
+        # Store in dict per race
+        persons_per_client = {}
+        self.files = defaultdict(list)
+        for i, (personline, attributeline) in enumerate(zip(persons, attributes)):
+            filename, person = personline.strip().split()
+            _filename, *attribs = attributeline.strip().split()
+            assert filename==_filename, "Filenames in identity and attribute files do not match"
+            client = persons_per_client.setdefault(int(person), int(i)%n_clients)
+            label = torch.tensor([(int(attrib)+1)//2 for attrib in attribs])
+            self.files[client].append((os.path.join(path, "images", filename), label))
+        # Augmentations
+        self.val_augs = torchvision.transforms.Compose([
+            torchvision.transforms.Resize(256),
+            torchvision.transforms.CenterCrop(224),
+            torchvision.transforms.ToTensor()
+        ])
+        self.train_augs = torchvision.transforms.Compose([
+            torchvision.transforms.RandomHorizontalFlip(),
+            torchvision.transforms.RandomResizedCrop(224, scale=(0.08, 1.0)),
+            torchvision.transforms.ColorJitter(brightness=0.1, contrast=0.1),
+            torchvision.transforms.ToTensor()
+        ])
+        
+    def __len__(self):
+        # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
+        return min([len(files) for files in self.files.values()])*self.n_clients
+        
+    def __getitem__(self, idx):
+        client = idx % len(self.files)
+        i = idx // len(self.files)
+        # Load
+        img_path, label = self.files[client][i]
+        img = PIL.Image.open(img_path).convert("RGB")
+        # Augment
+        if self.partition=="train": img = self.train_augs(img)
+        else: img = self.val_augs(img)
+        # Change to HWC
+        img = torch.permute(img, (1,2,0)).float()
+        return label, img
 
 def jax_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
@@ -359,10 +407,12 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
     elif dataset==1:
         dataset = ImageNet(path="imagenet/Data/CLS-LOC", partition=partition, n_clients=n_clients, n_classes=n_classes)
         assert skew in ["overlap", "label"], "Skew must be either 'overlap' or 'label'. For no skew, specify beta=0."
-    else:
-        assert n_clients<=3, "CityScapes supports a maximum of 3 clients."
+    elif dataset==2:
         dataset = OxfordPets(path="oxford_pets/", partition=partition, n_clients=n_clients)
         assert skew in ["overlap", "feature"], "Skew must be either 'overlap' or 'feature'. For no skew, specify beta=0."
+    elif dataset==3:
+        dataset = CelebA(path="celeba/", partition=partition, n_clients=n_clients)
+        assert skew in ["overlap", "label"], "Skew must be either 'overlap' or 'label'. For no skew, specify beta=0."
     collate = partial(jax_collate, n_clients=n_clients, beta=new_beta, skew=skew)
     # Iterable batches
     return DataLoader(
