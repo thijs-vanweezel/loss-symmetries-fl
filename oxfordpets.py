@@ -1,6 +1,6 @@
 # Imports
 import jax, optax, pickle
-from fedflax import train
+from fedflax import train, get_updates, aggregate
 from unetr import UNETR
 from data import fetch_data
 from utils import miou
@@ -13,10 +13,10 @@ n_clients = 1
 asymkwargs = {"key":jax.random.key(42)}
 
 # Initialize model
-model = UNETR(20, img_size=224, **asymkwargs)
+model_init = UNETR(20, img_size=224, **asymkwargs)
 lr = optax.warmup_exponential_decay_schedule(1e-4, .5, 2000, 1000, .9, end_value=1e-5)
 opt = nnx.Optimizer(
-    model,
+    model_init,
     optax.adamw(lr),
     wrt=nnx.Param
 )
@@ -32,7 +32,7 @@ def loss_fn(model, model_g, y, *xs):
     miou_err = 1. - miou(jax.nn.softmax(logits, axis=-1), y)
     return ce + miou_err
 models, rounds = train(
-    model,
+    model_init,
     opt,
     ds_train,
     loss_fn, 
@@ -41,14 +41,12 @@ models, rounds = train(
     rounds=1
 )
 
-# Aggregate
-struct, state, rest = nnx.split(models, (nnx.Param, nnx.BatchStat), ...)
-state_g = jax.tree.map(lambda x: x.mean(0), state)
-model_g = nnx.merge(struct, state_g, rest)
-
 # Save client models
 state = nnx.state(models, ...)
-pickle.dump(state, open("models/cs_central.pkl", "wb"))
+pickle.dump(state, open("models/oxford_central.pkl", "wb"))
+
+# Aggregate
+model_g = aggregate(model_init, get_updates(model_init, models))
 
 # Evaluate aggregated model
 model_g.eval()
