@@ -410,7 +410,7 @@ defaultconfig = ConfigDict({
     "transformer": ConfigDict(
         {"mlp_dim": 3072, "num_heads": 12, "num_layers": 12, "attention_dropout_rate": 0.0, "dropout_rate": 0.0, "add_position_embedding": False}
     ),
-    "classifier": "unpooled",
+    "classifier": "token",
     "representation_size": None,
     "hidden_size": 768
 })
