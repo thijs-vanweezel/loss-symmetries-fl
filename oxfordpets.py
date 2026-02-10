@@ -31,7 +31,7 @@ model_init = UNETR(20, img_size=224, **asymkwargs)
 lr = optax.warmup_exponential_decay_schedule(1e-4, .5, 2000, 1000, .9, end_value=1e-5)
 opt = nnx.Optimizer(
     model_init,
-    optax.adamw(lr),
+    optax.adam(lr),
     wrt=nnx.Param
 )
 
@@ -44,7 +44,8 @@ def loss_fn(model, model_g, y, *xs):
     logits = model(*xs, train=True)
     ce = optax.softmax_cross_entropy_with_integer_labels(logits, y, axis=-1).mean()
     miou_err = 1. - miou(jax.nn.softmax(logits, axis=-1), y)
-    return ce + miou_err
+    wd = nnx_norm(nnx.state(model, nnx.Param), n_clients=n_clients)
+    return ce + miou_err  + 1e-4*wd
 # Train (fixed number of epochs since test data is not available)
 models, rounds = train(
     model_init,
