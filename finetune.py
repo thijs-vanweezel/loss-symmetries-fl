@@ -6,9 +6,24 @@ import jax, optax, pickle
 from flax import nnx
 from functools import reduce
 from jax import numpy as jnp
+import argparse
 
-n_clients = 4
+parser = argparse.ArgumentParser(description="Fine-tune ViT on CelebA with FedFlax")
+parser.add_argument("--n_clients", type=int, default=4, help="Number of clients to simulate")
+parser.add_argument("--asymtype", type=str, default="", choices=["", "wasym", "syre", "normweights", "orderbias"], help="Type of symmetry elimination to use")
+args = parser.parse_args()
+n_clients = args.n_clients
 asymkwargs = {}
+if args.asymtype == "wasym":
+    asymkwargs["wasym"] = True
+    asymkwargs["kappa"] = 1
+elif args.asymtype == "syre":
+    asymkwargs["ssigma"] = 1e-4
+elif args.asymtype == "normweights":
+    asymkwargs["normweights"] = True
+elif args.asymtype == "orderbias":
+    asymkwargs["orderbias"] = True
+model_name = f"models/celeba_{args.asymtype or ('central' if n_clients==1 else 'base')}.pkl"
 
 # Load Google's ViT as backbone and attach head, mixing flax.linen and flax.nnx
 class Classifier(nnx.Module):
@@ -23,7 +38,7 @@ class Classifier(nnx.Module):
         x = x.reshape(x.shape[0], -1)
         x = self.head(x)
         return x
-ell = lambda m, mg, y, x: optax.sigmoid_binary_cross_entropy(m(x, train=True), y).mean() + nnx_norm(nnx.state(m, nnx.Param), n_clients=n_clients)
+ell = lambda m, mg, y, x: optax.sigmoid_binary_cross_entropy(m(x, train=True), y).mean() + 1e-4*nnx_norm(nnx.state(m, nnx.Param), n_clients=n_clients)
 
 # Optimizer which applies only to nnx.Param
 model = Classifier(**asymkwargs)
@@ -56,10 +71,10 @@ models, rounds = train(
 )
 
 # Save decoder
-save_model(models, "models/celeba_base.pkl")
+save_model(models, model_name)
 
 # Reload & evaluate
-models = load_model(lambda: Classifier(**asymkwargs), "models/celeba_base.pkl")
+models = load_model(lambda: Classifier(**asymkwargs), model_name)
 struct, state, rest = nnx.split(models, (nnx.Param, nnx.BatchStat), ...)
 model = nnx.merge(struct, jax.tree.map(lambda p: p.mean(0), state), rest)
 ds_val = fetch_data(beta=1., dataset=3, partition="test", n_clients=1, batch_size=16)
