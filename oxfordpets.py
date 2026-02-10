@@ -3,14 +3,28 @@ import jax, optax, pickle
 from fedflax import train, get_updates, aggregate
 from unetr import UNETR
 from data import fetch_data
-from utils import miou
+from utils import miou, save_model, nnx_norm
 from jax import numpy as jnp
 from flax import nnx
 from functools import reduce
+import argparse
 
-# Configuration
-n_clients = 1
+parser = argparse.ArgumentParser(description="Train a UNETR on Oxford Pets in a federated setting")
+parser.add_argument("--n_clients", type=int, default=4, help="Number of clients to simulate")
+parser.add_argument("--asymtype", type=str, default="", choices=["", "wasym", "syre", "normweights", "orderbias"], help="Type of symmetry elimination to use")
+args = parser.parse_args()
+n_clients = args.n_clients
 asymkwargs = {"key":jax.random.key(42)}
+if args.asymtype == "wasym":
+    asymkwargs["wasym"] = True
+    asymkwargs["kappa"] = 1
+elif args.asymtype == "syre":
+    asymkwargs["ssigma"] = 1e-4
+elif args.asymtype == "normweights":
+    asymkwargs["normweights"] = True
+elif args.asymtype == "orderbias":
+    asymkwargs["orderbias"] = True
+model_name = f"models/oxford_{args.asymtype or ('central' if n_clients==1 else 'base')}.pkl"
 
 # Initialize model
 model_init = UNETR(20, img_size=224, **asymkwargs)
@@ -25,12 +39,13 @@ opt = nnx.Optimizer(
 ds_train = fetch_data(beta=1., dataset=2, n_clients=n_clients, batch_size=16)
 ds_val = fetch_data(beta=1., dataset=2, partition="val", n_clients=n_clients, batch_size=16)
 
-# Train (fixed number of epochs since test data is not available)
+# Loss function with jaccard term and L2 weight decay
 def loss_fn(model, model_g, y, *xs):
     logits = model(*xs, train=True)
     ce = optax.softmax_cross_entropy_with_integer_labels(logits, y, axis=-1).mean()
     miou_err = 1. - miou(jax.nn.softmax(logits, axis=-1), y)
     return ce + miou_err
+# Train (fixed number of epochs since test data is not available)
 models, rounds = train(
     model_init,
     opt,
@@ -40,10 +55,8 @@ models, rounds = train(
     n_clients=n_clients,
     rounds=1
 )
-
 # Save client models
-state = nnx.state(models, ...)
-pickle.dump(state, open("models/oxford_central.pkl", "wb"))
+save_model(models, model_name)
 
 # Aggregate
 model_g = aggregate(model_init, get_updates(model_init, models))
