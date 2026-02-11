@@ -168,11 +168,10 @@ class AsymConv(nnx.Conv):
 # Used in resnet
 class ResNetBlock(nnx.Module):
     def __init__(self, key:jax.dtypes.prng_key, in_kernels:int, out_kernels:int, stride:int=1, wasym:bool=False, 
-                 kappa:float=1., sigma:float=0., activation=nnx.relu, orderbias:bool=False, normweights:bool=False):
+                 kappa:float=1., sigma:float=0., orderbias:bool=False, normweights:bool=False):
         super().__init__()
         keys = jax.random.split(key, 5)
         self.stride = stride
-        self.activation = activation
         self.norm1 = nnx.BatchNorm(in_kernels, rngs=nnx.Rngs(keys[1]), param_dtype=jnp.float32, dtype=jnp.bfloat16)
         self.conv1 = AsymConv(
             in_kernels, 
@@ -227,10 +226,10 @@ class ResNetBlock(nnx.Module):
         res = x if self.stride==1 else self.id_conv(x)
         # Pre-activation implementation
         x = self.norm1(x, use_running_average=not train)
-        x = self.activation(x)
+        x = nnx.relu(x)
         x = self.conv1(x)
         x = self.norm2(x, use_running_average=not train)
-        x = self.activation(x)
+        x = nnx.relu(x)
         x = self.conv2(x)
         x = res+x
         return x
@@ -239,7 +238,7 @@ class ResNetBlock(nnx.Module):
 class ResNet(nnx.Module):
     def __init__(self, key=jax.random.key(0), layers:tuple[int,...]=[2,2,2,2], kernels:tuple[int,...]=[64,128,256,512], 
                  channels_in:int=3, dim_out:int=1000, dimexp:bool=False, wasym:bool=False, kappa:float=1., sigma:float=0., 
-                 activation=nnx.relu, orderbias:bool=False, normweights:bool=False, **kwargs):
+                 orderbias:bool=False, normweights:bool=False, **kwargs):
         assert len(layers)==len(kernels)
         # Set some params
         super().__init__(**kwargs)
@@ -256,9 +255,8 @@ class ResNet(nnx.Module):
                 k_out = kernels[j]
                 s = 2 if i==0 and j>0 else 1
                 self.layers.append(ResNetBlock(next(keys), k_in, k_out, stride=s, wasym=wasym, kappa=kappa, sigma=sigma, 
-                                               activation=activation, orderbias=orderbias, normweights=normweights))
+                                               orderbias=orderbias, normweights=normweights))
         self.bn = nnx.BatchNorm(kernels[-1], rngs=nnx.Rngs(next(keys)), param_dtype=jnp.float32, dtype=jnp.bfloat16)
-        self.activation = activation
         self.fc = AsymLinear(kernels[-1], dim_out, next(keys), wasym, kappa, sigma, orderbias, normweights=False, 
                              param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
     def __call__(self, x, z=None, train=True):
@@ -270,7 +268,7 @@ class ResNet(nnx.Module):
         for layer in self.layers:
             x = layer(x, train=train)
         x = self.bn(x, use_running_average=not train)
-        x = self.activation(x)
+        x = nnx.relu(x)
         x = jnp.mean(x, axis=(1,2), dtype=jnp.float32)
         x = self.fc(x)
         return x
@@ -342,10 +340,9 @@ class ResNetAutoEncoder(nnx.Module):
 # LeNet-5 for 36X60 images + 3 auxiliary features
 class LeNet(nnx.Module):
     def __init__(self, key=jax.random.key(0), dimexp=False, wasym=False, kappa=1., dim_out=2, sigma=0., 
-                 activation=nnx.relu, orderbias=False, channels_in=1, normweights=False):
+                 orderbias=False, channels_in=1, normweights=False):
         # Some params
         super().__init__()
-        self.activation = activation
         # Dimension expansion params
         self.flat_shape = (15,27) if dimexp else (6,12)
         flat_dim = self.flat_shape[0]*self.flat_shape[1]*16 + 3
@@ -363,18 +360,18 @@ class LeNet(nnx.Module):
         x = x if not self.dimexp else interleave(x)
         # Forward pass
         x, norm = self.conv1(x)
-        x = self.activation(x)
+        x = nnx.relu(x)
         x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
         x, norm = self.conv2(x, norm)
-        x = self.activation(x)
+        x = nnx.relu(x)
         x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
         x = jnp.reshape(x, (x.shape[0], -1))
         x = jnp.concatenate([x, z], axis=-1)
         if norm is not None: norm = jnp.concat([jnp.tile(norm, (*self.flat_shape,1)).flatten(), jnp.ones(3)])
         x, norm = self.fc1(x, norm)
-        x = self.activation(x)
+        x = nnx.relu(x)
         x, norm = self.fc2(x, norm)
-        x = self.activation(x)
+        x = nnx.relu(x)
         x, _ = self.fc3(x, norm)
         return x
 
