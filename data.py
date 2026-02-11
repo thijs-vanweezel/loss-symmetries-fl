@@ -97,7 +97,7 @@ class ImageNet(Dataset):
         ])
         self.train_augs = torchvision.transforms.Compose([
             torchvision.transforms.RandomHorizontalFlip(),
-            torchvision.transforms.RandomResizedCrop(224, scale=(0.08, 1.0)),
+            torchvision.transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
             torchvision.transforms.ColorJitter(brightness=0.1, contrast=0.1),
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -320,7 +320,7 @@ class CelebA(Dataset):
         ])
         self.train_augs = torchvision.transforms.Compose([
             torchvision.transforms.RandomHorizontalFlip(),
-            torchvision.transforms.RandomResizedCrop(224, scale=(0.08, 1.0)),
+            torchvision.transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
             torchvision.transforms.ColorJitter(brightness=0.1, contrast=0.1),
             torchvision.transforms.ToTensor()
         ])
