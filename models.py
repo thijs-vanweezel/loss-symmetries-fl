@@ -50,7 +50,7 @@ class AsymLinear(nnx.Linear):
         if sigma>0. or self.wasym: self.randk = NonTrainable(jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype))
         if sigma>0.: self.randb = NonTrainable(jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype))
 
-    def __call__(self, inputs:jax.Array) -> jax.Array:
+    def __call__(self, inputs:jax.Array, norm_prev:jax.Array=None) -> jax.Array:
         bias = self.bias
         kernel = self.kernel
         # Apply SyRe (before wasym to avoid biasing the masked weights)
@@ -67,9 +67,9 @@ class AsymLinear(nnx.Linear):
             kernel = kernel * self.wmask + (1-self.wmask) * self.randk * self.kappa
         # Normalize kernel to unit norm per output neuron
         if self.normweights:
-            norm = jnp.linalg.norm(kernel, axis=0, keepdims=True)
-            kernel /= norm
-            bias /= norm.squeeze()
+            norm = jnp.linalg.norm(kernel*norm_prev[:,None], axis=0)
+            kernel = kernel * norm_prev[:,None] / norm
+            if self.use_bias: bias /= norm
         # Implementation directly copied from nnx.Linear
         inputs, kernel, bias = self.promote_dtype(
             (inputs, kernel, bias), dtype=self.dtype
@@ -81,7 +81,7 @@ class AsymLinear(nnx.Linear):
             precision=self.precision,
         )
         y += jnp.reshape(bias, (1,) * (y.ndim - 1) + (-1,))
-        return y
+        return y, None if not self.normweights else norm
 
 # Creates mask with the maximum number of non-zero weights while ensuring that each row is unique
 # Supports only square kernels
@@ -99,7 +99,7 @@ def mask_conv_densest(kernel_size, in_channels, out_channels, **kwargs):
                 return mask
             mask = mask.at[tuple(cols_idx) + (out_channel_idx,)].set(0)
             out_channel_idx += 1
-    warnings.warn("Mask is identifiable")
+    warnings.warn("Mask is not identifiable")
     return mask
 
 # W-Asymmetry implementation consistent with https://github.com/cptq/asymmetric-networks/blob/main/lmc/models/models_resnet.py#L22
@@ -122,7 +122,7 @@ class AsymConv(nnx.Conv):
         if sigma>0. or self.wasym: self.randk = NonTrainable(jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype))
         if sigma>0. and self.use_bias: self.randb = NonTrainable(jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype))
 
-    def __call__(self, inputs:jax.Array) -> jax.Array:
+    def __call__(self, inputs:jax.Array, norm_prev:jax.Array=None) -> jax.Array:
         bias = self.bias
         kernel = self.kernel
         # Apply SyRe (before wasym to avoid biasing the masked weights)
@@ -139,9 +139,13 @@ class AsymConv(nnx.Conv):
             kernel = kernel * self.wmask + (1-self.wmask) * self.randk * self.kappa
         # Normalize kernel to unit norm per output neuron
         if self.normweights:
-            norm = jnp.linalg.norm(kernel.reshape(-1, self.out_features), axis=0, keepdims=True)
-            kernel /= norm
-            if self.use_bias: bias /= norm.squeeze()
+            if norm_prev is not None:
+                norm = jnp.linalg.norm(jnp.reshape(kernel*norm_prev[:,None], (-1, self.out_features)), axis=0)
+                kernel = kernel / norm * norm_prev[:,None]
+            else:
+                norm = jnp.linalg.norm(jnp.reshape(kernel, (-1, self.out_features)), axis=0)
+                kernel = kernel / norm
+            if self.use_bias: bias /= norm
         # Implementation directly copied from nnx.Conv
         inputs, kernel, bias = self.promote_dtype(
             (inputs, kernel, bias), dtype=self.dtype
@@ -159,7 +163,7 @@ class AsymConv(nnx.Conv):
         )
         if self.use_bias:
             y += bias.reshape((1,) * (y.ndim - bias.ndim) + bias.shape)
-        return y
+        return y, None if not self.normweights else norm
 
 # Used in resnet
 class ResNetBlock(nnx.Module):
@@ -343,13 +347,14 @@ class LeNet(nnx.Module):
         super().__init__()
         self.activation = activation
         # Dimension expansion params
-        flat_shape = 15*27 if dimexp else 6*12
+        self.flat_shape = (15,27) if dimexp else (6,12)
+        flat_dim = self.flat_shape[0]*self.flat_shape[1]*16 + 3
         self.dimexp = dimexp
         # Layers
         keys = jax.random.split(key, 5)
         self.conv1 = AsymConv(channels_in, 8, (4,4), keys[0], wasym, kappa, sigma, orderbias, normweights,  padding="VALID")
         self.conv2 = AsymConv(8, 16, (4,4), keys[1], wasym, kappa, sigma, orderbias, normweights, padding="VALID")
-        self.fc1 = AsymLinear(flat_shape*16+3, 128, keys[2], wasym, kappa, sigma, orderbias, normweights)
+        self.fc1 = AsymLinear(flat_dim, 128, keys[2], wasym, kappa, sigma, orderbias, normweights)
         self.fc2 = AsymLinear(128, 64, keys[3], wasym, kappa, sigma, orderbias, normweights)
         self.fc3 = AsymLinear(64, dim_out, keys[4], wasym, kappa, sigma, orderbias, normweights=False)
     
@@ -357,19 +362,20 @@ class LeNet(nnx.Module):
         # Apply dimension expansion if desired
         x = x if not self.dimexp else interleave(x)
         # Forward pass
-        x = self.conv1(x)
+        x, norm = self.conv1(x)
         x = self.activation(x)
         x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
-        x = self.conv2(x)
+        x, norm = self.conv2(x, norm)
         x = self.activation(x)
         x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
         x = jnp.reshape(x, (x.shape[0], -1))
         x = jnp.concatenate([x, z], axis=-1)
-        x = self.fc1(x)
+        if norm is not None: norm = jnp.concat([jnp.tile(norm, (*self.flat_shape,1)).flatten(), jnp.ones(3)])
+        x, norm = self.fc1(x, norm)
         x = self.activation(x)
-        x = self.fc2(x)
+        x, norm = self.fc2(x, norm)
         x = self.activation(x)
-        x = self.fc3(x)
+        x, _ = self.fc3(x, norm)
         return x
 
 def teleport_lenet(model, key, tau_range=.1):
