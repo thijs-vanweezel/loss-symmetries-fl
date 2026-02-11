@@ -378,36 +378,6 @@ class LeNet(nnx.Module):
         x, _ = self.fc3(x, norm)
         return x
 
-def teleport_lenet(model, key, tau_range=.1):
-    assert isinstance(model, LeNet), "Teleportation must be (slightly) adjusted for models other than LeNet-5"
-    # Extract params
-    model_tree = nnx.to_tree(model)
-    params, struct = jax.tree.flatten(model_tree)
-
-    # Assign tau to the output channels of each kernel
-    def random(size):
-        nonlocal key
-        _, key = jax.random.split(key)
-        return jax.random.uniform(key, size, minval=1.-tau_range, maxval=1.+tau_range)
-    tau = jax.tree.map(lambda p: random(p.shape[-1]), params[::2])
-    # "Input neurons" require tau=1
-    tau_a = [jnp.ones(1)] + jax.tree.leaves(tau) 
-    tau_a[2] = jnp.tile(tau_a[2], (6,12,1)).flatten() # Transition from conv to flattened fc
-    tau_a[2] = jnp.concat([tau_a[2], jnp.ones(3)])  # Account for auxiliary input neurons
-    # Output neurons require tau=1
-    tau_b = jax.tree.leaves(tau)[:-1] + [jnp.ones(16)]
-    coefs_kernel = jax.tree.map(lambda t_a, t_b: jnp.outer(1/t_a, t_b), tau_a[:-1], tau_b)
-
-    # Due to bias requiring tau=1, this is equivalent to tau + ones(channels_out)
-    coefs_bias = tau_b
-
-    # Interleave kernel and bias coefs, as they are originally
-    coefs = list(chain(*zip(coefs_bias, coefs_kernel)))
-    # Teleport the model
-    params_tele = jax.tree.map(lambda p, c: c*p, params, coefs)
-    # Rebuild the model
-    return nnx.from_tree(jax.tree.unflatten(struct, params_tele))
-
 # Config copied from the ViT-B_16 at https://github.com/google-research/vision_transformer/blob/main/vit_jax/configs/models.py#L113
 defaultconfig = ConfigDict({
     "num_classes": 0, # No classification head
