@@ -66,10 +66,13 @@ class AsymLinear(nnx.Linear):
         if self.wasym:
             kernel = kernel * self.wmask + (1-self.wmask) * self.randk * self.kappa
         # Normalize kernel to unit norm per output neuron
+        if norm_prev is not None:
+            kernel = kernel*norm_prev[:,None]
         if self.normweights:
-            norm = jnp.linalg.norm(kernel*norm_prev[:,None], axis=0)
-            kernel = kernel * norm_prev[:,None] / norm
+            norm = jnp.linalg.norm(kernel, axis=0)
+            kernel = kernel / norm
             if self.use_bias: bias /= norm
+        else: norm = None
         # Implementation directly copied from nnx.Linear
         inputs, kernel, bias = self.promote_dtype(
             (inputs, kernel, bias), dtype=self.dtype
@@ -81,7 +84,7 @@ class AsymLinear(nnx.Linear):
             precision=self.precision,
         )
         y += jnp.reshape(bias, (1,) * (y.ndim - 1) + (-1,))
-        return y, None if not self.normweights else norm
+        return y, norm
 
 # Creates mask with the maximum number of non-zero weights while ensuring that each row is unique
 # Supports only square kernels
@@ -138,14 +141,13 @@ class AsymConv(nnx.Conv):
         if self.wasym:
             kernel = kernel * self.wmask + (1-self.wmask) * self.randk * self.kappa
         # Normalize kernel to unit norm per output neuron
+        if norm_prev is not None:
+            kernel = kernel*norm_prev[:,None]
         if self.normweights:
-            if norm_prev is not None:
-                norm = jnp.linalg.norm(jnp.reshape(kernel*norm_prev[:,None], (-1, self.out_features)), axis=0)
-                kernel = kernel / norm * norm_prev[:,None]
-            else:
-                norm = jnp.linalg.norm(jnp.reshape(kernel, (-1, self.out_features)), axis=0)
-                kernel = kernel / norm
+            norm = jnp.linalg.norm(jnp.reshape(kernel, (-1, self.out_features)), axis=0)
+            kernel = kernel / norm
             if self.use_bias: bias /= norm
+        else: norm = None
         # Implementation directly copied from nnx.Conv
         inputs, kernel, bias = self.promote_dtype(
             (inputs, kernel, bias), dtype=self.dtype
@@ -163,7 +165,7 @@ class AsymConv(nnx.Conv):
         )
         if self.use_bias:
             y += bias.reshape((1,) * (y.ndim - bias.ndim) + bias.shape)
-        return y, None if not self.normweights else norm
+        return y, norm
 
 # Used in resnet
 class ResNetBlock(nnx.Module):
