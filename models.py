@@ -167,14 +167,30 @@ class AsymConv(nnx.Conv):
             y += bias.reshape((1,) * (y.ndim - bias.ndim) + bias.shape)
         return y, norm
 
+class AsymBatchNorm(nnx.BatchNorm):
+    def __init__(self, normweights=False, **kwargs):
+        super().__init__(**kwargs)
+        self.normweights = normweights
+    def __call__(self, x, use_running_average=None, norm_prev=None):
+        if norm_prev is not None:
+            self.mean.value /= norm_prev
+            self.var.value /= norm_prev**2
+        if self.normweights:
+            norm = self.scale.value
+            if self.use_scale: self.scale.value /= norm
+            if self.use_bias: self.bias.value /= norm
+        else: norm = None
+        x = super().__call__(x, use_running_average)
+        return x, norm
+
 # Used in resnet
 class ResNetBlock(nnx.Module):
-    def __init__(self, key:jax.dtypes.prng_key, in_kernels:int, out_kernels:int, stride:int=1, wasym:bool=False, 
-                 kappa:float=1., sigma:float=0., orderbias:bool=False, normweights:bool=False):
+    def __init__(self, key:jax.dtypes.prng_key, in_kernels:int, out_kernels:int, stride:int=1, 
+                 wasym:bool=False, kappa:float=1., sigma:float=0., normweights:bool=False):
         super().__init__()
         keys = jax.random.split(key, 5)
         self.stride = stride
-        self.norm1 = nnx.BatchNorm(in_kernels, rngs=nnx.Rngs(keys[1]), param_dtype=jnp.float32, dtype=jnp.bfloat16)
+        self.norm1 = AsymBatchNorm(normweights, num_features=in_kernels, rngs=nnx.Rngs(keys[1]), param_dtype=jnp.float32, dtype=jnp.bfloat16)
         self.conv1 = AsymConv(
             in_kernels, 
             out_kernels,
@@ -191,7 +207,7 @@ class ResNetBlock(nnx.Module):
             dtype=jnp.bfloat16,
             use_bias=False
         )
-        self.norm2 = nnx.BatchNorm(out_kernels, rngs=nnx.Rngs(keys[3]), param_dtype=jnp.float32, dtype=jnp.bfloat16)
+        self.norm2 = AsymBatchNorm(normweights, num_features=out_kernels, rngs=nnx.Rngs(keys[3]), param_dtype=jnp.float32, dtype=jnp.bfloat16)
         self.conv2 = AsymConv(
             out_kernels,
             out_kernels,
@@ -226,10 +242,10 @@ class ResNetBlock(nnx.Module):
 
     def __call__(self, x_in, train=True, norm_prev=None):
         # Pre-activation implementation
-        h = self.norm1(x_in, use_running_average=not train)
+        h, norm = self.norm1(x_in, use_running_average=not train, norm_prev=norm_prev)
         h = nnx.relu(h)
-        h, norm = self.conv1(h, norm_prev)
-        h = self.norm2(h, use_running_average=not train)
+        h, norm = self.conv1(h, norm)
+        h, norm = self.norm2(h, use_running_average=not train, norm_prev=norm)
         h = nnx.relu(h)
         h, norm = self.conv2(h, norm)
         # Apply identity downsampling if needed and perform scaling
@@ -263,9 +279,9 @@ class ResNet(nnx.Module):
                 k_in = ([kernels[0]]+kernels)[j] if i==0 else kernels[j]
                 k_out = kernels[j]
                 s = 2 if i==0 and j>0 else 1
-                self.layers.append(ResNetBlock(next(keys), k_in, k_out, stride=s, wasym=wasym, kappa=kappa, sigma=sigma, 
-                                               orderbias=orderbias, normweights=normweights))
-        self.bn = nnx.BatchNorm(kernels[-1], rngs=nnx.Rngs(next(keys)), param_dtype=jnp.float32, dtype=jnp.bfloat16)
+                self.layers.append(ResNetBlock(next(keys), k_in, k_out, stride=s, wasym=wasym, kappa=kappa, 
+                                               sigma=sigma, normweights=normweights))
+        self.bn = AsymBatchNorm(normweights, num_features=kernels[-1], rngs=nnx.Rngs(next(keys)), param_dtype=jnp.float32, dtype=jnp.bfloat16)
         self.fc = AsymLinear(kernels[-1], dim_out, next(keys), wasym, kappa, sigma, orderbias, normweights=False, 
                              param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
     def __call__(self, x, train=True):
@@ -276,7 +292,7 @@ class ResNet(nnx.Module):
         x = nnx.max_pool(x, window_shape=(3,3), strides=(2,2), padding="SAME")
         for layer in self.layers:
             x, norm = layer(x, train=train, norm_prev=norm)
-        x = self.bn(x, use_running_average=not train)
+        x, norm = self.bn(x, use_running_average=not train, norm_prev=norm)
         x = nnx.relu(x)
         x = jnp.mean(x, axis=(1,2), dtype=jnp.float32)
         x, _ = self.fc(x, norm)
