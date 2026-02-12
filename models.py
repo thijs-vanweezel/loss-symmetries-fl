@@ -224,21 +224,24 @@ class ResNetBlock(nnx.Module):
                 use_bias=False
             )
 
-    def __call__(self, x, train=True, norm_prev=None):
-        if self.stride==1:
-            res = x
-        else:
-            res, _ = self.id_conv(x)
+    def __call__(self, x_in, train=True, norm_prev=None):
         # Pre-activation implementation
-        x = self.norm1(x, use_running_average=not train)
-        x = nnx.relu(x)
-        x, norm = self.conv1(x, norm_prev)
-        x = self.norm2(x, use_running_average=not train)
-        x = nnx.relu(x)
-        x, norm = self.conv2(x, norm)
-        if norm_prev is not None: res /= norm # TODO
-        x = res+x
-        return x, norm
+        h = self.norm1(x_in, use_running_average=not train)
+        h = nnx.relu(h)
+        h, norm = self.conv1(h, norm_prev)
+        h = self.norm2(h, use_running_average=not train)
+        h = nnx.relu(h)
+        h, norm = self.conv2(h, norm)
+        # Apply identity downsampling if needed and perform scaling
+        if norm_prev is not None:
+            x_in = x_in*norm_prev
+        if self.stride>1:
+            x_in, _ = self.id_conv(x_in)
+        if norm is not None:
+            x_in /= norm
+        # Add residual
+        out = x_in+h
+        return out, norm
 
 # Resnet for ImageNet ([3,4,6,3] for 34 layers, [2,2,2,2] for 18 layers)
 class ResNet(nnx.Module):
