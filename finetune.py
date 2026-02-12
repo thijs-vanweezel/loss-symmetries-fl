@@ -14,11 +14,13 @@ parser.add_argument("--asymtype", type=str, default="", choices=["", "wasym", "s
 args = parser.parse_args()
 n_clients = args.n_clients
 asymkwargs = {}
+ell = lambda m, mg, y, x: optax.sigmoid_binary_cross_entropy(m(x, train=True), y).mean()
 if args.asymtype == "wasym":
     asymkwargs["wasym"] = True
     asymkwargs["kappa"] = 1
 elif args.asymtype == "syre":
     asymkwargs["ssigma"] = 1e-4
+    ell = lambda m, mg, y, x: optax.sigmoid_binary_cross_entropy(m(x, train=True), y).mean() + 1e-4*nnx_norm(nnx.state(m, nnx.Param), n_clients=n_clients)
 elif args.asymtype == "normweights":
     asymkwargs["normweights"] = True
 elif args.asymtype == "orderbias":
@@ -38,7 +40,6 @@ class Classifier(nnx.Module):
         x = x.reshape(x.shape[0], -1)
         x = self.head(x)
         return x
-ell = lambda m, mg, y, x: optax.sigmoid_binary_cross_entropy(m(x, train=True), y).mean() + 1e-4*nnx_norm(nnx.state(m, nnx.Param), n_clients=n_clients)
 
 # Optimizer which applies only to nnx.Param
 model = Classifier(**asymkwargs)
@@ -56,7 +57,7 @@ ds_train = fetch_data(beta=1., dataset=3, n_clients=n_clients, batch_size=16, sk
 ds_val = fetch_data(beta=1., dataset=3, partition="val", n_clients=n_clients, batch_size=16, skew="label")
 
 # Train
-err_fn = lambda m, y, x: jnp.mean((m(x, train=False)>0)==(y>0.5))
+err_fn = lambda m, y, x: 1-jnp.mean(round(nnx.sigmoid(m(x, train=False)))==y)
 models, rounds = train(
     model,
     opt,
