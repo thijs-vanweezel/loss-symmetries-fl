@@ -216,25 +216,29 @@ class ResNetBlock(nnx.Module):
                 wasym, 
                 kappa, 
                 sigma, 
-                False, 
-                normweights,
+                orderbias=False, 
+                normweights=False,
                 strides=(stride, stride), 
                 dtype=jnp.bfloat16, 
                 param_dtype=jnp.bfloat16,
                 use_bias=False
             )
 
-    def __call__(self, x, train=True):
-        res = x if self.stride==1 else self.id_conv(x)
+    def __call__(self, x, train=True, norm_prev=None):
+        if self.stride==1:
+            res = x
+        else:
+            res, _ = self.id_conv(x)
         # Pre-activation implementation
         x = self.norm1(x, use_running_average=not train)
         x = nnx.relu(x)
-        x = self.conv1(x)
+        x, norm = self.conv1(x, norm_prev)
         x = self.norm2(x, use_running_average=not train)
         x = nnx.relu(x)
-        x = self.conv2(x)
+        x, norm = self.conv2(x, norm)
+        if norm_prev is not None: res /= norm # TODO
         x = res+x
-        return x
+        return x, norm
 
 # Resnet for ImageNet ([3,4,6,3] for 34 layers, [2,2,2,2] for 18 layers)
 class ResNet(nnx.Module):
@@ -253,7 +257,7 @@ class ResNet(nnx.Module):
         self.layers = []
         for j, l in enumerate(layers):
             for i in range(l):
-                k_in = ([64]+kernels)[j] if i==0 else kernels[j]
+                k_in = ([kernels[0]]+kernels)[j] if i==0 else kernels[j]
                 k_out = kernels[j]
                 s = 2 if i==0 and j>0 else 1
                 self.layers.append(ResNetBlock(next(keys), k_in, k_out, stride=s, wasym=wasym, kappa=kappa, sigma=sigma, 
@@ -261,18 +265,18 @@ class ResNet(nnx.Module):
         self.bn = nnx.BatchNorm(kernels[-1], rngs=nnx.Rngs(next(keys)), param_dtype=jnp.float32, dtype=jnp.bfloat16)
         self.fc = AsymLinear(kernels[-1], dim_out, next(keys), wasym, kappa, sigma, orderbias, normweights=False, 
                              param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
-    def __call__(self, x, z=None, train=True):
+    def __call__(self, x, train=True):
         # Apply dimension expansion if desired
         x = x if not self.dimexp else interleave(x)
         # Forward pass
-        x = self.conv(x)
+        x, norm = self.conv(x)
         x = nnx.max_pool(x, window_shape=(3,3), strides=(2,2), padding="SAME")
         for layer in self.layers:
-            x = layer(x, train=train)
+            x, norm = layer(x, train=train, norm_prev=norm)
         x = self.bn(x, use_running_average=not train)
         x = nnx.relu(x)
         x = jnp.mean(x, axis=(1,2), dtype=jnp.float32)
-        x = self.fc(x)
+        x, _ = self.fc(x, norm)
         return x
 
 # LeNet-5 for 36X60 images + 3 auxiliary features
