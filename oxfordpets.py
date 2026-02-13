@@ -21,7 +21,6 @@ if args.asymtype == "wasym":
     asymkwargs["kappa"] = 1
 elif args.asymtype == "syre":
     asymkwargs["ssigma"] = 1e-4
-    loss_fn = lambda model, model_g, y, *xs: _loss_fn(model, model_g, y, *xs) + 1e-4*nnx_norm(nnx.state(model, nnx.Param), n_clients=n_clients)
 elif args.asymtype == "normweights":
     asymkwargs["normweights"] = True
 elif args.asymtype == "orderbias":
@@ -38,13 +37,13 @@ opt = nnx.Optimizer(
 )
 
 # Loss function with jaccard term
-def _loss_fn(model, model_g, y, *xs):
-    logits = model(*xs, train=True)
+def _loss_fn(model, model_g, y, x):
+    logits = model(x, train=True)
     ce = optax.softmax_cross_entropy_with_integer_labels(logits, y, axis=-1).mean()
     miou_err = 1. - miou(jax.nn.softmax(logits, axis=-1), y)
     return ce + miou_err
 if args.asymtype == "syre":
-    loss_fn = lambda model, model_g, y, *xs: _loss_fn(model, model_g, y, *xs) + 1e-4*nnx_norm(nnx.state(model, nnx.Param), n_clients=n_clients)
+    loss_fn = lambda model, model_g, y, x: _loss_fn(model, model_g, y, x) + 1e-4*nnx_norm(nnx.state(model, nnx.Param), n_clients=n_clients)
 else:
     loss_fn = _loss_fn
 
@@ -60,7 +59,7 @@ models, rounds = train(
     loss_fn, 
     local_epochs=50,
     n_clients=n_clients,
-    rounds=1
+    rounds=1 if n_clients==1 else 10,
 )
 # Save client models
 save_model(models, model_name)
@@ -71,7 +70,7 @@ model_g = aggregate(model_init, get_updates(model_init, models))
 # Evaluate aggregated model
 model_g.eval()
 vval_fn = nnx.jit(nnx.vmap(
-    lambda model, y, *xs: miou(jax.nn.one_hot(jnp.argmax(model(*xs, train=False), axis=-1), y.shape[-1]), y), 
+    lambda model, y, x: miou(jax.nn.one_hot(jnp.argmax(model(x, train=False), axis=-1), y.shape[-1]), y), 
     in_axes=(None,0,0)))
 miou_g = reduce(lambda acc, batch: acc + vval_fn(model_g, *batch), ds_val, 0.) / len(ds_val)
 print("Global mIoU: ", miou_g.mean().item())
@@ -79,7 +78,7 @@ print("Global mIoU: ", miou_g.mean().item())
 # Evaluate client models separately
 models.eval()
 vval_fn = nnx.jit(nnx.vmap(
-    lambda model, y, *xs: miou(jax.nn.one_hot(jnp.argmax(model(*xs, train=False), axis=-1), y.shape[-1]), y), 
+    lambda model, y, x: miou(jax.nn.one_hot(jnp.argmax(model(x, train=False), axis=-1), y.shape[-1]), y), 
     ))
 miou_l = reduce(lambda acc, batch: acc + vval_fn(models, *batch), ds_val, 0.) / len(ds_val)
 print("Local mIoU: ", miou_l.mean().item())
