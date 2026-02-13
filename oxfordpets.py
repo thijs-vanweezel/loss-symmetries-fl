@@ -1,5 +1,5 @@
 # Imports
-import jax, optax, pickle
+import jax, optax, pickle, subprocess, os
 from fedflax import train, get_updates, aggregate
 from unetr import UNETR
 from data import fetch_data
@@ -15,11 +15,13 @@ parser.add_argument("--asymtype", type=str, default="", choices=["", "wasym", "s
 args = parser.parse_args()
 n_clients = args.n_clients
 asymkwargs = {"key":jax.random.key(42)}
+# Asymmetry parameters
 if args.asymtype == "wasym":
     asymkwargs["wasym"] = True
     asymkwargs["kappa"] = 1
 elif args.asymtype == "syre":
     asymkwargs["ssigma"] = 1e-4
+    loss_fn = lambda model, model_g, y, *xs: _loss_fn(model, model_g, y, *xs) + 1e-4*nnx_norm(nnx.state(model, nnx.Param), n_clients=n_clients)
 elif args.asymtype == "normweights":
     asymkwargs["normweights"] = True
 elif args.asymtype == "orderbias":
@@ -35,17 +37,21 @@ opt = nnx.Optimizer(
     wrt=nnx.Param
 )
 
+# Loss function with jaccard term
+def _loss_fn(model, model_g, y, *xs):
+    logits = model(*xs, train=True)
+    ce = optax.softmax_cross_entropy_with_integer_labels(logits, y, axis=-1).mean()
+    miou_err = 1. - miou(jax.nn.softmax(logits, axis=-1), y)
+    return ce + miou_err
+if args.asymtype == "syre":
+    loss_fn = lambda model, model_g, y, *xs: _loss_fn(model, model_g, y, *xs) + 1e-4*nnx_norm(nnx.state(model, nnx.Param), n_clients=n_clients)
+else:
+    loss_fn = _loss_fn
+
 # Load data
 ds_train = fetch_data(beta=1., dataset=2, n_clients=n_clients, batch_size=16)
 ds_val = fetch_data(beta=1., dataset=2, partition="val", n_clients=n_clients, batch_size=16)
 
-# Loss function with jaccard term and L2 weight decay
-def loss_fn(model, model_g, y, *xs):
-    logits = model(*xs, train=True)
-    ce = optax.softmax_cross_entropy_with_integer_labels(logits, y, axis=-1).mean()
-    miou_err = 1. - miou(jax.nn.softmax(logits, axis=-1), y)
-    wd = nnx_norm(nnx.state(model, nnx.Param), n_clients=n_clients)
-    return ce + miou_err  + 1e-4*wd
 # Train (fixed number of epochs since test data is not available)
 models, rounds = train(
     model_init,
