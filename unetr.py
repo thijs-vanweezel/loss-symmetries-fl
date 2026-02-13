@@ -101,13 +101,13 @@ class MLPBlock(nnx.Sequential):
         rngs: nnx.Rngs = nnx.Rngs(0),
         **asymkwargs
     ):
-        layers = [
+        layers = nnx.List([
             AsymLinear(hidden_size, mlp_dim, rngs=rngs, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16, **asymkwargs),
             activation_layer,
             nnx.Dropout(dropout_rate, rngs=rngs),
             AsymLinear(mlp_dim, hidden_size, rngs=rngs, param_dtype=jnp.bfloat16, dtype=jnp.bfloat16, **asymkwargs),
             nnx.Dropout(dropout_rate, rngs=rngs),
-        ]
+        ])
         super().__init__(*layers)
 
 class ViTEncoderBlock(nnx.Module):
@@ -175,10 +175,10 @@ class ViT(nnx.Module):
             rngs=rngs,
             **asymkwargs
         )
-        self.blocks = [
+        self.blocks = nnx.List([
             ViTEncoderBlock(hidden_size, mlp_dim, num_heads, dropout_rate, rngs=rngs, **asymkwargs)
-            for i in range(num_layers)
-        ]
+            for _ in range(num_layers)
+        ])
         self.norm = nnx.LayerNorm(hidden_size, rngs=rngs)
 
     def __call__(self, x: jax.Array) -> jax.Array:
@@ -217,7 +217,7 @@ class Conv2dNormActivation(nnx.Sequential):
         # and after each spatial dimension
         padding = ((padding, padding), (padding, padding))
 
-        layers = [
+        layers = nnx.List([
             AsymConv(
                 in_channels,
                 out_channels,
@@ -232,7 +232,7 @@ class Conv2dNormActivation(nnx.Sequential):
                 dtype=jnp.bfloat16,
                 **asymkwargs
             )
-        ]
+        ])
 
         if norm_layer is not None:
             layers.append(norm_layer(out_channels, rngs=rngs))
@@ -367,7 +367,7 @@ class UnetrPrUpBlock(nnx.Module):
             param_dtype=jnp.bfloat16,
             **asymkwargs
         )
-        self.blocks = [
+        self.blocks = nnx.List([
             nnx.Sequential(
                 AsymConvTranspose(
                     in_features=out_channels,
@@ -390,7 +390,7 @@ class UnetrPrUpBlock(nnx.Module):
                 ),
             )
             for _ in range(num_layer)
-        ]
+        ])
 
     def __call__(self, x: jax.Array) -> jax.Array:
         x = self.transp_conv_init(x)
