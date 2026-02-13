@@ -273,7 +273,7 @@ class ResNet(nnx.Module):
         # Layers
         self.conv = AsymConv(channels_in, 64, (7,7), next(keys), wasym, kappa, sigma, orderbias, normweights,
                              strides=(2,2), padding="SAME", param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
-        self.layers = []
+        self.layers = nnx.List([])
         for j, l in enumerate(layers):
             for i in range(l):
                 k_in = ([kernels[0]]+kernels)[j] if i==0 else kernels[j]
