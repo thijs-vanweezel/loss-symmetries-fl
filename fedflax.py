@@ -13,9 +13,9 @@ def return_train_step(ell, n_inputs):
     ell = nnx.vmap(nnx.value_and_grad(ell), in_axes=(0,None,0)+(0,)*n_inputs)
     # Make fast
     @nnx.jit
-    def train_step(models, model_g, opt, y, *xs):
+    def train_step(models, model_g, opt:nnx.Optimizer, y, *xs):
         loss, grad = ell(models, model_g, y, *xs)
-        opt.update(grad) # Assumes it refers to the correct models
+        opt.update(models, grad)
         return loss
     return train_step
 
