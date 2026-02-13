@@ -5,6 +5,13 @@ import jax
 from typing import Callable
 from models import AsymConv, AsymLinear
 
+class AsymConv(AsymConv):
+    def __call__(self, x:jax.Array):
+        return super().__call__(x)[0]
+class AsymLinear(AsymLinear):
+    def __call__(self, x:jax.Array):
+        return super().__call__(x)[0]
+
 class AsymConvTranspose(AsymConv):
     def __call__(self, inputs:jax.Array) -> jax.Array:
         bias = self.bias
