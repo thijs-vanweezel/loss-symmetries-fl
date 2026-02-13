@@ -29,7 +29,7 @@ model_name = f"models/oxford_{args.asymtype or ('central' if n_clients==1 else '
 
 # Initialize model
 model_init = UNETR(20, img_size=224, **asymkwargs)
-lr = optax.warmup_exponential_decay_schedule(1e-4, .5, 2000, 1000, .9, end_value=1e-5)
+lr = optax.warmup_exponential_decay_schedule(1e-4, .5, 500, 250, .9, end_value=1e-5)
 opt = nnx.Optimizer(
     model_init,
     optax.adam(lr),
@@ -48,8 +48,8 @@ else:
     loss_fn = _loss_fn
 
 # Load data
-ds_train = fetch_data(beta=1., dataset=2, n_clients=n_clients, batch_size=16)
-ds_val = fetch_data(beta=1., dataset=2, partition="val", n_clients=n_clients, batch_size=16)
+ds_train = fetch_data(beta=1., dataset=2, n_clients=n_clients)
+ds_val = fetch_data(beta=1., dataset=2, partition="val", n_clients=n_clients)
 
 # Train (fixed number of epochs since test data is not available)
 models, rounds = train(
