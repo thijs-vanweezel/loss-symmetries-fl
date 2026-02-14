@@ -34,12 +34,19 @@ class Classifier(nnx.Module):
         super().__init__()
         self.backbone, self.bbparams = fetch_vit()
         self.bbparams = jax.tree.map(nnx.Param, self.bbparams)
-        self.head = AsymLinear(768, 40, key=key, **asymkwargs)
+        keys = jax.random.split(key, 3)
+        self.fc1 = AsymLinear(768, 512, key=keys[0], **asymkwargs)
+        self.fc2 = AsymLinear(512, 128, key=keys[1], **asymkwargs)
+        self.fc3 = AsymLinear(128, 40, key=keys[2], **asymkwargs)
 
     def __call__(self, x, train=False):
         x = self.backbone.apply({"params": self.bbparams}, x, train=train)
         x = x.reshape(x.shape[0], -1)
-        x = self.head(x)
+        x, norm = self.fc1(x)
+        x = nnx.relu(x)
+        x, norm = self.fc2(x, norm)
+        x = nnx.relu(x)
+        x, norm = self.fc3(x, norm)
         return x
 
 # Model and optimizer
