@@ -20,7 +20,8 @@ if args.asymtype == "wasym":
     asymkwargs["kappa"] = 1
 elif args.asymtype == "syre":
     asymkwargs["ssigma"] = 1e-4
-    ell = lambda m, mg, y, x: optax.sigmoid_binary_cross_entropy(m(x, train=True), y).mean() + 1e-4*nnx_norm(nnx.state(m, nnx.Param), n_clients=n_clients)
+    ell = lambda m, mg, y, x: optax.sigmoid_binary_cross_entropy(m(x, train=True), y).mean() \
+        + 1e-4*nnx_norm(nnx.state(m, nnx.Param), n_clients=n_clients)
 elif args.asymtype == "normweights":
     asymkwargs["normweights"] = True
 elif args.asymtype == "orderbias":
@@ -32,7 +33,7 @@ class Classifier(nnx.Module):
     def __init__(self, key=jax.random.key(0), **asymkwargs):
         super().__init__()
         self.backbone, self.bbparams = fetch_vit()
-        self.bbparams = jax.tree.map_with_path(lambda path, p: nnx.Param(p) if not any("LayerNorm" in part.key for part in path) else nnx.BatchStat(p), self.bbparams)
+        self.bbparams = jax.tree.map(nnx.Param, self.bbparams)
         self.head = AsymLinear(768, 40, key=key, **asymkwargs)
 
     def __call__(self, x, train=False):
@@ -41,7 +42,7 @@ class Classifier(nnx.Module):
         x = self.head(x)
         return x
 
-# Optimizer which applies only to nnx.Param
+# Model and optimizer
 model = Classifier(**asymkwargs)
 lr = optax.warmup_exponential_decay_schedule(1e-4, .1, 4000, 1000, .9, end_value=1e-5)
 opt = nnx.Optimizer(
@@ -67,7 +68,7 @@ models, rounds = train(
     local_epochs="early",
     n_clients=n_clients,
     max_patience=3,
-    rounds="early",
+    rounds=1 if n_clients==1 else "early",
     val_fn=err_fn
 )
 
