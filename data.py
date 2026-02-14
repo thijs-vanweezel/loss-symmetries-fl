@@ -235,6 +235,7 @@ class OxfordPets(Dataset):
         self.files = defaultdict(list)
         for line in lines:
             filename, classint, *_ = line.strip().split(" ")
+            if filename in ["beagle_116", "chihuahua_121"]: continue
             client = classes_per_client[classint:=int(classint)]
             self.files[client].append((os.path.join(path, "images", filename+".jpg"), os.path.join(path, "annotations", "trimaps", filename+".png")))
         for client in self.files:
@@ -301,12 +302,18 @@ class OxfordPets(Dataset):
 class CelebA(Dataset):
     def __init__(self, path:str="celeba", partition="train", n_clients=4):
         self.n_clients = n_clients
-        self.partition = partition
         # Load filenames and race
         with open(os.path.join(path, "identity_CelebA.txt")) as f:
             persons = f.readlines()
         with open(os.path.join(path, "list_attr_celeba.txt")) as f:
             attributes = f.readlines()[2:]
+        assert len(persons)==len(attributes), "Identity and attribute files have different number of lines"
+        # Split based on partition
+        self.partition = partition
+        if partition=="train": persons, attributes = persons[:int(0.7*len(persons))], attributes[:int(0.7*len(attributes))]
+        elif partition=="val": persons, attributes = persons[int(0.7*len(persons)):int(0.85*len(persons))], attributes[int(0.7*len(attributes)):int(0.85*len(attributes))]
+        elif partition=="test": persons, attributes = persons[int(0.85*len(persons)):], attributes[int(0.85*len(attributes)):]
+        else: raise ValueError("Partition must be one of 'train', 'val', or 'test'")
         # Store in dict per race
         persons_per_client = {}
         self.files = defaultdict(list)
