@@ -58,10 +58,10 @@ models, rounds = train(
     opt,
     ds_train,
     loss_fn, 
-    local_epochs=50,
+    local_epochs="early",
     n_clients=n_clients,
-    rounds=1 if n_clients==1 else "ealy",
-    max_patience=None if n_clients==1 else 3,
+    rounds=1 if n_clients==1 else "early",
+    max_patience=3,
     val_fn=lambda model, y, x: 1-miou(jax.nn.one_hot(jnp.argmax(model(x, train=False), axis=-1), y.shape[-1]), y),
     ds_val=ds_val
 )
