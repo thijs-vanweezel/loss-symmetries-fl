@@ -50,6 +50,7 @@ else:
 # Load data
 ds_train = fetch_data(beta=1., dataset=2, n_clients=n_clients)
 ds_val = fetch_data(beta=1., dataset=2, partition="val", n_clients=n_clients)
+ds_test = fetch_data(beta=1., dataset=2, partition="test", n_clients=n_clients)
 
 # Train (fixed number of epochs since test data is not available)
 models, rounds = train(
@@ -59,7 +60,10 @@ models, rounds = train(
     loss_fn, 
     local_epochs=50,
     n_clients=n_clients,
-    rounds=1 if n_clients==1 else 10,
+    rounds=1 if n_clients==1 else "ealy",
+    max_patience=None if n_clients==1 else 3,
+    val_fn=lambda model, y, x: 1-miou(jax.nn.one_hot(jnp.argmax(model(x, train=False), axis=-1), y.shape[-1]), y),
+    ds_val=ds_val
 )
 # Save client models
 save_model(models, model_name)
@@ -72,7 +76,7 @@ model_g.eval()
 vval_fn = nnx.jit(nnx.vmap(
     lambda model, y, x: miou(jax.nn.one_hot(jnp.argmax(model(x, train=False), axis=-1), y.shape[-1]), y), 
     in_axes=(None,0,0)))
-miou_g = reduce(lambda acc, batch: acc + vval_fn(model_g, *batch), ds_val, 0.) / len(ds_val)
+miou_g = reduce(lambda acc, batch: acc + vval_fn(model_g, *batch), ds_test, 0.) / len(ds_test)
 print("Global mIoU: ", miou_g.mean().item())
 
 # Evaluate client models separately
@@ -80,5 +84,5 @@ models.eval()
 vval_fn = nnx.jit(nnx.vmap(
     lambda model, y, x: miou(jax.nn.one_hot(jnp.argmax(model(x, train=False), axis=-1), y.shape[-1]), y), 
     ))
-miou_l = reduce(lambda acc, batch: acc + vval_fn(models, *batch), ds_val, 0.) / len(ds_val)
+miou_l = reduce(lambda acc, batch: acc + vval_fn(models, *batch), ds_test, 0.) / len(ds_test)
 print("Local mIoU: ", miou_l.mean().item())
