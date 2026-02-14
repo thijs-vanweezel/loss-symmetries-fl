@@ -221,10 +221,15 @@ class OxfordPets(Dataset):
         else:
             self.seed = torch.Generator()
             self.seed.manual_seed(42)
-        self.partition = partition
         # Load filenames and race
         with open(os.path.join(path, "annotations", "list.txt")) as f:
             lines = f.readlines()[6:]
+        # Split based on partition
+        self.partition = partition
+        if partition=="train": lines = lines[:int(0.7*len(lines))]
+        elif partition=="val": lines = lines[int(0.7*len(lines)):int(0.85*len(lines))]
+        elif partition=="test": lines = lines[int(0.85*len(lines)):]
+        else: raise ValueError("Partition must be one of 'train', 'val', or 'test'")
         # Store in dict per race
         classes_per_client = {i+1:i%n_clients for i in range(37)}
         self.files = defaultdict(list)
