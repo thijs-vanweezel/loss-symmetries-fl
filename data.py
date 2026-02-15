@@ -253,8 +253,8 @@ class OxfordPets(Dataset):
         """Deterministic train augmentations"""
         # Flip
         if torch.randint(0, 2, (), generator=self.seed).item():
-            img = img[...,::-1]
-            mask = mask[...,::-1]
+            img = img.flip((-1,))
+            mask = mask.flip((-1,))
         # Crop
         i = torch.randint(0, img.shape[1]-224+1, (), generator=self.seed).item()
         j = torch.randint(0, img.shape[2]-224+1, (), generator=self.seed).item()
@@ -425,6 +425,7 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
         **kwargs
 
     )
+
 
 
 
