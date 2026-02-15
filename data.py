@@ -217,6 +217,7 @@ class CityScapes(Dataset):
 class OxfordPets(Dataset):
     def __init__(self, path:str="oxford_pets", partition="train", seed=None, n_clients=4):
         self.n_clients = n_clients
+        self.partition = partition
         if seed is not None: self.seed = seed 
         else:
             self.seed = torch.Generator()
@@ -224,16 +225,11 @@ class OxfordPets(Dataset):
         # Load filenames and race
         with open(os.path.join(path, "annotations", "list.txt")) as f:
             lines = f.readlines()[6:]
-        # Split based on partition
-        self.partition = partition
-        if partition=="train": lines = lines[:int(0.7*len(lines))]
-        elif partition=="val": lines = lines[int(0.7*len(lines)):int(0.85*len(lines))]
-        elif partition=="test": lines = lines[int(0.85*len(lines)):]
-        else: raise ValueError("Partition must be one of 'train', 'val', or 'test'")
         # Store in dict per race
         classes_per_client = {i+1:i%n_clients for i in range(37)}
         self.files = defaultdict(list)
-        for line in lines:
+        for i, line in enumerate(lines):
+            if ["train", "val", "test"][(j:=(i%20-14)//14+1)+(j*i%2)]!=partition: continue
             filename, classint, *_ = line.strip().split(" ")
             if filename in ["beagle_116", "chihuahua_121"]: continue
             client = classes_per_client[classint:=int(classint)]
