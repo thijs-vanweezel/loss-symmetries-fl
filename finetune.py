@@ -1,3 +1,5 @@
+import os
+os.environ["XLA_FLAGS"] = " --xla_gpu_strict_conv_algorithm_picker=false"
 from fedflax import train
 from models import fetch_vit, NonTrainable, AsymLinear
 from data import fetch_data

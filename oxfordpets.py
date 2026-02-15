@@ -1,4 +1,6 @@
 # Imports
+import os
+os.environ["XLA_FLAGS"] = " --xla_gpu_strict_conv_algorithm_picker=false"
 import jax, optax, pickle, subprocess, os
 from fedflax import train, get_updates, aggregate
 from unetr import UNETR

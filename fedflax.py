@@ -1,7 +1,4 @@
-import os
-os.environ["XLA_FLAGS"] = "--xla_gpu_deterministic_ops=true"
-os.environ["XLA_FLAGS"] += " --xla_gpu_strict_conv_algorithm_picker=false"
-import jax, numpy as np
+import jax, numpy as np, os
 from functools import reduce
 from jax import numpy as jnp
 from flax import nnx
