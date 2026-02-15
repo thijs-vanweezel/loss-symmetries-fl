@@ -20,7 +20,7 @@ if args.asymtype == "wasym":
     asymkwargs["wasym"] = True
     asymkwargs["kappa"] = 1
 elif args.asymtype == "syre":
-    asymkwargs["ssigma"] = 1e-4
+    asymkwargs["sigma"] = 1e-4
 elif args.asymtype == "normweights":
     asymkwargs["normweights"] = True
 elif args.asymtype == "orderbias":
@@ -43,7 +43,7 @@ def _loss_fn(model, model_g, y, x):
     miou_err = 1. - miou(jax.nn.softmax(logits, axis=-1), y)
     return ce + miou_err
 if args.asymtype == "syre":
-    loss_fn = lambda model, model_g, y, x: _loss_fn(model, model_g, y, x) + 1e-4*nnx_norm(nnx.state(model, nnx.Param), n_clients=n_clients)
+    loss_fn = lambda model, model_g, y, x: _loss_fn(model, model_g, y, x) + 1e-4*nnx_norm(nnx.state(model, nnx.Param), n_clients=n_clients).mean()
 else:
     loss_fn = _loss_fn
 
