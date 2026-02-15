@@ -238,19 +238,16 @@ class OxfordPets(Dataset):
             if filename in ["beagle_116", "chihuahua_121"]: continue
             client = classes_per_client[classint:=int(classint)]
             img = torchvision.io.decode_image(os.path.join(path, "images", filename+".jpg"), mode="RGB").float() / 255.
+            img = torchvision.transforms.functional.resize(img, 256)
+            mask = torchvision.transforms.functional.resize(mask, 256, 
+                                                            interpolation=torchvision.transforms.InterpolationMode.NEAREST, 
+                                                            antialias=False)
             mask = torchvision.io.decode_image(os.path.join(path, "annotations", "trimaps", filename+".png")).long() - 1
             self.files[client].append((img, mask))
         for client in self.files:
             self.files[client].sort(key=lambda x: hashlib.sha256(str(x).encode()).hexdigest())
         # Deterministic val augs
-        self.xval_augs = torchvision.transforms.Compose([
-            torchvision.transforms.Resize(256),
-            torchvision.transforms.CenterCrop(224),
-        ])
-        self.yval_augs = torchvision.transforms.Compose([
-            torchvision.transforms.Resize(256, interpolation=torchvision.transforms.InterpolationMode.NEAREST, antialias=False),
-            torchvision.transforms.CenterCrop(224),
-        ])
+        self.val_aug = torchvision.transforms.CenterCrop(224)
 
     def train_aug(self, img, mask):
         """Deterministic train augmentations"""
@@ -258,20 +255,11 @@ class OxfordPets(Dataset):
         if torch.bernoulli(torch.tensor(.5), generator=self.seed).item():
             img = torchvision.transforms.functional.hflip(img) 
             mask = torchvision.transforms.functional.hflip(mask)
-        # Resize
-        img = torchvision.transforms.functional.resize(img, 256)
-        mask = torchvision.transforms.functional.resize(mask, 256, 
-                                                         interpolation=torchvision.transforms.InterpolationMode.NEAREST, 
-                                                         antialias=False)
         # Crop
         i = torch.randint(0, img.shape[1]-224+1, (), generator=self.seed).item()
         j = torch.randint(0, img.shape[2]-224+1, (), generator=self.seed).item()
         img = torchvision.transforms.functional.crop(img, i, j, 224, 224)
         mask = torchvision.transforms.functional.crop(mask, i, j, 224, 224)
-        # Rotate
-        angle = torch.empty(()).uniform_(-15, 15, generator=self.seed).item()
-        img = torchvision.transforms.functional.affine(img, angle, (0,0), 1., 0)
-        mask = torchvision.transforms.functional.affine(mask, angle, (0,0), 1., 0)
         # Color jitter
         brightness = torch.empty(()).uniform_(0.8, 1.2, generator=self.seed).item()
         contrast = torch.empty(()).uniform_(0.8, 1.2, generator=self.seed).item()
@@ -292,8 +280,8 @@ class OxfordPets(Dataset):
             img, mask = self.train_aug(img, mask)
             self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
         else:
-            img = self.xval_augs(img)
-            mask = self.yval_augs(mask)
+            img = self.val_aug(img)
+            mask = self.val_aug(mask)
         # Change to HWC
         img = torch.permute(img, (1,2,0))
         mask = torch.squeeze(mask)
@@ -436,3 +424,4 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
         **kwargs
 
     )
+
