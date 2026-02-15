@@ -252,19 +252,20 @@ class OxfordPets(Dataset):
     def train_aug(self, img, mask):
         """Deterministic train augmentations"""
         # Flip
-        if torch.bernoulli(torch.tensor(.5), generator=self.seed).item():
-            img = torchvision.transforms.functional.hflip(img) 
-            mask = torchvision.transforms.functional.hflip(mask)
+        if torch.randint(0, 2, (), generator=self.seed).item():
+            img = img[...,::-1]
+            mask = mask[...,::-1]
         # Crop
         i = torch.randint(0, img.shape[1]-224+1, (), generator=self.seed).item()
         j = torch.randint(0, img.shape[2]-224+1, (), generator=self.seed).item()
         img = torchvision.transforms.functional.crop(img, i, j, 224, 224)
         mask = torchvision.transforms.functional.crop(mask, i, j, 224, 224)
         # Color jitter
-        brightness = torch.empty(()).uniform_(0.8, 1.2, generator=self.seed).item()
-        contrast = torch.empty(()).uniform_(0.8, 1.2, generator=self.seed).item()
-        img = torchvision.transforms.functional.adjust_brightness(img, brightness)
-        img = torchvision.transforms.functional.adjust_contrast(img, contrast)
+        brightness = 0.8 + torch.rand((), generator=self.seed).item()*0.4
+        img *= brightness
+        contrast = 0.8 + torch.rand((), generator=self.seed).item()*0.4
+        mean = torch.mean(img, (1,2), keepdims=True)
+        img = (img - mean) * contrast + mean
         return img, mask
 
     def __len__(self):
@@ -424,4 +425,5 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
         **kwargs
 
     )
+
 
