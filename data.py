@@ -229,10 +229,13 @@ class OxfordPets(Dataset):
         classes_per_client = {i+1:i%n_clients for i in range(37)}
         self.files = defaultdict(list)
         for i, line in enumerate(lines):
+            # Deterministic train/val/test split which likely retains each breed in each partition
             if ["train", "val", "test"][(j:=(i%20-14)//14+1)+(j*i%2)]!=partition: continue
             filename, classint, *_ = line.strip().split(" ")
+            # Skip two corrupted files
             if filename in ["beagle_116", "chihuahua_121"]: continue
             client = classes_per_client[classint:=int(classint)]
+            # Load in ram (move to __getitem__ if problematic)
             img = torchvision.io.decode_image(os.path.join(path, "images", filename+".jpg"), mode="RGB").float() / 255.
             img = torchvision.transforms.functional.resize(img, 256)
             mask = torchvision.io.decode_image(os.path.join(path, "annotations", "trimaps", filename+".png")).long() - 1
@@ -287,26 +290,26 @@ class OxfordPets(Dataset):
 class CelebA(Dataset):
     def __init__(self, path:str="celeba", partition="train", n_clients=4):
         self.n_clients = n_clients
+        self.partition = partition
         # Load filenames and race
         with open(os.path.join(path, "identity_CelebA.txt")) as f:
             persons = f.readlines()
         with open(os.path.join(path, "list_attr_celeba.txt")) as f:
             attributes = f.readlines()[2:]
-        assert len(persons)==len(attributes), "Identity and attribute files have different number of lines"
-        # Split based on partition
-        self.partition = partition
-        if partition=="train": persons, attributes = persons[:int(0.7*len(persons))], attributes[:int(0.7*len(attributes))]
-        elif partition=="val": persons, attributes = persons[int(0.7*len(persons)):int(0.85*len(persons))], attributes[int(0.7*len(attributes)):int(0.85*len(attributes))]
-        elif partition=="test": persons, attributes = persons[int(0.85*len(persons)):], attributes[int(0.85*len(attributes)):]
-        else: raise ValueError("Partition must be one of 'train', 'val', or 'test'")
         # Store in dict per race
         persons_per_client = {}
         self.files = defaultdict(list)
+        c = 0
         for i, (personline, attributeline) in enumerate(zip(persons, attributes)):
+            # Deterministic train/val/test split which likely retains each person in each partition
+            if ["train", "val", "test"][(j:=(i%20-14)//14+1)+(j*i%2)]: continue
             filename, person = personline.strip().split()
             _filename, *attribs = attributeline.strip().split()
             assert filename==_filename, "Filenames in identity and attribute files do not match"
-            client = persons_per_client.setdefault(int(person), int(i)%n_clients)
+            # Assign to client
+            client = persons_per_client.setdefault(int(person), c)
+            c = (c+1) % n_clients
+            # One-hot encoded label
             label = torch.tensor([(int(attrib)+1)//2 for attrib in attribs])
             self.files[client].append((os.path.join(path, "images", filename), label))
         # Augmentations
