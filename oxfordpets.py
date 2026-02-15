@@ -1,6 +1,8 @@
 # Imports
 import os
 os.environ["XLA_FLAGS"] = " --xla_gpu_strict_conv_algorithm_picker=false"
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
 import jax, optax, pickle, subprocess, os
 from fedflax import train, get_updates, aggregate
 from unetr import UNETR
