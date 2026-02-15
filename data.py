@@ -80,9 +80,11 @@ class ImageNet(Dataset):
                 client = class_splits[classname]
                 # Insert at interleaved indices so that samples are not ordered by class (note: deterministic)
                 for i, file in enumerate(filelist):
+                    img = PIL.Image.open(os.path.join(dirname, file)).convert("RGB")
+                    img = torchvision.transforms.functional.resize(img, 256)
                     self.data[client].insert(
                         i*(label_idx-n_classes//n_clients*client), 
-                        (label_idx, os.path.join(dirname, file))
+                        (label_idx, img)
                     )
                 label_idx += 1
         # Misc attributes
@@ -90,14 +92,13 @@ class ImageNet(Dataset):
         self.n_classes = n_classes
         # Augmentations
         self.val_augs = torchvision.transforms.Compose([
-            torchvision.transforms.Resize(256),
             torchvision.transforms.CenterCrop(224),
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
         self.train_augs = torchvision.transforms.Compose([
+            torchvision.transforms.RandomCrop(224),
             torchvision.transforms.RandomHorizontalFlip(),
-            torchvision.transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
             torchvision.transforms.ColorJitter(brightness=0.1, contrast=0.1),
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -111,9 +112,7 @@ class ImageNet(Dataset):
         # Load datum
         c = idx % self.n_clients
         i = idx // self.n_clients
-        label, filepath = self.data[c][i]
-        # Load image
-        img = PIL.Image.open(filepath).convert("RGB")
+        label, img = self.data[c][i]
         # Apply augmentations
         if self.partition=="train": img = self.train_augs(img)
         else: img = self.val_augs(img)
@@ -311,16 +310,17 @@ class CelebA(Dataset):
             c = (c+1) % n_clients
             # One-hot encoded label
             label = torch.tensor([(int(attrib)+1)//2 for attrib in attribs])
-            self.files[client].append((os.path.join(path, "images", filename), label))
+            img = PIL.Image.open(os.path.join(path, "images", filename)).convert("RGB")
+            img = torchvision.transforms.functional.resize(img, 256)
+            self.files[client].append((img, label))
         # Augmentations
         self.val_augs = torchvision.transforms.Compose([
-            torchvision.transforms.Resize(256),
             torchvision.transforms.CenterCrop(224),
             torchvision.transforms.ToTensor()
         ])
         self.train_augs = torchvision.transforms.Compose([
+            torchvision.transforms.RandomCrop(224),
             torchvision.transforms.RandomHorizontalFlip(),
-            torchvision.transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
             torchvision.transforms.ColorJitter(brightness=0.1, contrast=0.1),
             torchvision.transforms.ToTensor()
         ])
@@ -333,8 +333,7 @@ class CelebA(Dataset):
         client = idx % len(self.files)
         i = idx // len(self.files)
         # Load
-        img_path, label = self.files[client][i]
-        img = PIL.Image.open(img_path).convert("RGB")
+        img, label = self.files[client][i]
         # Augment
         if self.partition=="train": img = self.train_augs(img)
         else: img = self.val_augs(img)
