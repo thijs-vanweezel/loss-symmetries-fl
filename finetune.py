@@ -65,6 +65,7 @@ opt = nnx.Optimizer(
 # Cityscapes data
 ds_train = fetch_data(beta=1., dataset=3, n_clients=n_clients, batch_size=16, skew="label")
 ds_val = fetch_data(beta=1., dataset=3, partition="val", n_clients=n_clients, batch_size=16, skew="label")
+ds_test = fetch_data(beta=1., dataset=3, partition="test", n_clients=1, batch_size=16)
 
 # Train
 err_fn = lambda m, y, x: 1-jnp.mean(round(nnx.sigmoid(m(x, train=False)))==y)
@@ -84,11 +85,15 @@ models, rounds = train(
 # Save decoder
 save_model(models, model_name)
 
-# Reload & evaluate
+# Reload & evaluate local
 models = load_model(lambda: Classifier(**asymkwargs), model_name)
+vtest_fn = nnx.jit(nnx.vmap(err_fn, in_axes=(0,0,0)))
+error = reduce(lambda acc, batch: acc + vtest_fn(models, *batch), ds_test, 0.) / len(ds_test)
+print(f"Local test error (local model): {error.item()*100:.2f}%")
+
+# Evaluate global
 struct, state, rest = nnx.split(models, (nnx.Param, nnx.BatchStat), ...)
 model = nnx.merge(struct, jax.tree.map(lambda p: p.mean(0), state), rest)
-ds_test = fetch_data(beta=1., dataset=3, partition="test", n_clients=1, batch_size=16)
 vtest_fn = nnx.jit(nnx.vmap(err_fn, in_axes=(None,0,0)))
 error = reduce(lambda acc, batch: acc + vtest_fn(model, *batch), ds_test, 0.) / len(ds_test)
 print(f"Global test error (aggregated model): {error.item()*100:.2f}%")
