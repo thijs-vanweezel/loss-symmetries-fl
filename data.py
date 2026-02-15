@@ -237,7 +237,9 @@ class OxfordPets(Dataset):
             filename, classint, *_ = line.strip().split(" ")
             if filename in ["beagle_116", "chihuahua_121"]: continue
             client = classes_per_client[classint:=int(classint)]
-            self.files[client].append((os.path.join(path, "images", filename+".jpg"), os.path.join(path, "annotations", "trimaps", filename+".png")))
+            img = torchvision.io.decode_image(os.path.join(path, "images", filename+".jpg"), mode="RGB").float() / 255.
+            mask = torchvision.io.decode_image(os.path.join(path, "annotations", "trimaps", filename+".png")).long() - 1
+            self.files[client].append((img, mask))
         for client in self.files:
             self.files[client].sort(key=lambda x: hashlib.sha256(str(x).encode()).hexdigest())
         # Deterministic val augs
@@ -284,9 +286,7 @@ class OxfordPets(Dataset):
     def __getitem__(self, idx: int):
         client = idx % len(self.files)
         i = idx // len(self.files)
-        img_path, mask_path = self.files[client][i]
-        img = torchvision.io.decode_image(img_path, mode="RGB").float() / 255.
-        mask = torchvision.io.decode_image(mask_path).long() - 1
+        img, mask = self.files[client][i]
         # Apply augmentations
         if self.partition=="train": 
             img, mask = self.train_aug(img, mask)
@@ -434,4 +434,5 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
         shuffle=False,
         drop_last=True,
         **kwargs
+
     )
