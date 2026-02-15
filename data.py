@@ -239,10 +239,10 @@ class OxfordPets(Dataset):
             client = classes_per_client[classint:=int(classint)]
             img = torchvision.io.decode_image(os.path.join(path, "images", filename+".jpg"), mode="RGB").float() / 255.
             img = torchvision.transforms.functional.resize(img, 256)
+            mask = torchvision.io.decode_image(os.path.join(path, "annotations", "trimaps", filename+".png")).long() - 1
             mask = torchvision.transforms.functional.resize(mask, 256, 
                                                             interpolation=torchvision.transforms.InterpolationMode.NEAREST, 
                                                             antialias=False)
-            mask = torchvision.io.decode_image(os.path.join(path, "annotations", "trimaps", filename+".png")).long() - 1
             self.files[client].append((img, mask))
         for client in self.files:
             self.files[client].sort(key=lambda x: hashlib.sha256(str(x).encode()).hexdigest())
@@ -425,5 +425,6 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
         **kwargs
 
     )
+
 
 
