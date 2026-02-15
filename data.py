@@ -302,7 +302,7 @@ class CelebA(Dataset):
         c = 0
         for i, (personline, attributeline) in enumerate(zip(persons, attributes)):
             # Deterministic train/val/test split which likely retains each person in each partition
-            if ["train", "val", "test"][(j:=(i%20-14)//14+1)+(j*i%2)]: continue
+            if ["train", "val", "test"][(j:=(i%20-14)//14+1)+(j*i%2)]!=partition: continue
             filename, person = personline.strip().split()
             _filename, *attribs = attributeline.strip().split()
             assert filename==_filename, "Filenames in identity and attribute files do not match"
