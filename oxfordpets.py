@@ -54,9 +54,9 @@ if __name__ == "__main__":
     ds_train = fetch_data(beta=1., dataset=2, n_clients=n_clients, batch_size=64,
                         num_workers=4, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
     ds_val = fetch_data(beta=1., dataset=2, partition="val", n_clients=n_clients, batch_size=64, 
-                        num_workers=4, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
+                        num_workers=2, prefetch_factor=1, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
     ds_test = fetch_data(beta=1., dataset=2, partition="test", n_clients=n_clients, batch_size=64, 
-                        num_workers=4, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
+                        num_workers=2, prefetch_factor=1, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
 
     # Train (fixed number of epochs since test data is not available)
     models, rounds = train(
