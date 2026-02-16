@@ -36,14 +36,13 @@ def mask_linear_densest(in_dim, out_dim, **kwargs):
 # And kernel normalization consistent with https://github.com/o-laurent/bayes_posterior_symmetry_exploration/blob/main/symmetries/scale_resnet.py#L166
 class AsymLinear(nnx.Linear):
     def __init__(self, in_features:int, out_features:int, key:jax.dtypes.prng_key, wasym:bool=False, 
-                 kappa:float=1., sigma:float=0., orderbias:bool=False, normweights:bool=False, **kwargs):
+                 kappa:float=1., sigma:float=0., normweights:bool=False, **kwargs):
         keys = jax.random.split(key, 4)
         super().__init__(in_features, out_features, rngs=kwargs.pop("rngs",nnx.Rngs(keys[0])), use_bias=True, **kwargs)
         # Check if asymmetry is to be applied
         self.ssigma = sigma
         self.wasym = bool(wasym)
         self.kappa = kappa
-        self.orderbias = orderbias
         self.normweights = normweights
         # Create asymmetry params
         if self.wasym: self.wmask = NonTrainable(mask_linear_densest(*self.kernel.shape, dtype=self.param_dtype))
@@ -57,11 +56,6 @@ class AsymLinear(nnx.Linear):
         if self.ssigma>0.:
             bias = bias + self.randb * self.ssigma
             kernel = kernel + self.randk * self.ssigma
-        # Order bias to counter permutation symmetry
-        if self.orderbias: bias = jnp.concatenate([
-            bias[0:1],
-            jnp.cumsum(jnp.exp(bias[1:])) + bias[0:1]
-        ])
         # Apply w-asymmetry
         if self.wasym:
             kernel = kernel * self.wmask + (1-self.wmask) * self.randk * self.kappa
@@ -109,15 +103,13 @@ def mask_conv_densest(kernel_size, in_channels, out_channels, **kwargs):
 # And kernel normalization consistent with https://github.com/o-laurent/bayes_posterior_symmetry_exploration/blob/main/symmetries/scale_resnet.py#L166
 class AsymConv(nnx.Conv):
     def __init__(self, in_features:int, out_features:int, kernel_size:tuple[int,...], key:jax.dtypes.prng_key, wasym:bool=False, 
-                 kappa:float=1., sigma:float=0., orderbias:bool=False, normweights:bool=False, **kwargs):
+                 kappa:float=1., sigma:float=0., normweights:bool=False, **kwargs):
         keys = jax.random.split(key, 4)
         super().__init__(in_features, out_features, kernel_size, rngs=kwargs.pop("rngs", nnx.Rngs(keys[0])), **kwargs)
         # Check if asymmetry is to be applied
         self.ssigma = sigma
         self.wasym = bool(wasym)
         self.kappa = kappa
-        assert not orderbias or self.use_bias, "Order bias requires use_bias=True"
-        self.orderbias = orderbias
         self.normweights = normweights
         self.maybe_broadcast = lambda x: (x,) * len(self.kernel_size) if isinstance(x, int) else tuple(x)
         # Create asymmetry params
@@ -132,11 +124,6 @@ class AsymConv(nnx.Conv):
         if self.ssigma>0.:
             if self.use_bias: bias = bias + self.randb * self.ssigma
             kernel = kernel + self.randk * self.ssigma
-        # Order bias to counter permutation symmetry
-        if self.orderbias: bias = jnp.concatenate([
-            bias[0:1],
-            jnp.cumsum(jnp.exp(bias[1:])) + bias[0:1]
-        ])
         # Apply w-asymmetry
         if self.wasym:
             kernel = kernel * self.wmask + (1-self.wmask) * self.randk * self.kappa
@@ -232,7 +219,6 @@ class ResNetBlock(nnx.Module):
                 wasym, 
                 kappa, 
                 sigma, 
-                orderbias=False, 
                 normweights=False,
                 strides=(stride, stride), 
                 dtype=jnp.bfloat16, 
@@ -263,7 +249,7 @@ class ResNetBlock(nnx.Module):
 class ResNet(nnx.Module):
     def __init__(self, key=jax.random.key(0), layers:tuple[int,...]=[2,2,2,2], kernels:tuple[int,...]=[64,128,256,512], 
                  channels_in:int=3, dim_out:int=1000, dimexp:bool=False, wasym:bool=False, kappa:float=1., sigma:float=0., 
-                 orderbias:bool=False, normweights:bool=False, **kwargs):
+                 normweights:bool=False, **kwargs):
         assert len(layers)==len(kernels)
         # Set some params
         super().__init__(**kwargs)
@@ -271,7 +257,7 @@ class ResNet(nnx.Module):
         # Keys
         keys = iter(jax.random.split(key, sum(layers)+3))
         # Layers
-        self.conv = AsymConv(channels_in, 64, (7,7), next(keys), wasym, kappa, sigma, orderbias, normweights,
+        self.conv = AsymConv(channels_in, 64, (7,7), next(keys), wasym, kappa, sigma, normweights,
                              strides=(2,2), padding="SAME", param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
         self.layers = nnx.List([])
         for j, l in enumerate(layers):
@@ -282,7 +268,7 @@ class ResNet(nnx.Module):
                 self.layers.append(ResNetBlock(next(keys), k_in, k_out, stride=s, wasym=wasym, kappa=kappa, 
                                                sigma=sigma, normweights=normweights))
         self.bn = AsymBatchNorm(normweights, num_features=kernels[-1], rngs=nnx.Rngs(next(keys)), param_dtype=jnp.float32, dtype=jnp.bfloat16)
-        self.fc = AsymLinear(kernels[-1], dim_out, next(keys), wasym, kappa, sigma, orderbias, normweights=False, 
+        self.fc = AsymLinear(kernels[-1], dim_out, next(keys), wasym, kappa, sigma, normweights=False, 
                              param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
     def __call__(self, x, train=True):
         # Apply dimension expansion if desired
@@ -300,8 +286,8 @@ class ResNet(nnx.Module):
 
 # LeNet-5 for 36X60 images + 3 auxiliary features
 class LeNet(nnx.Module):
-    def __init__(self, key=jax.random.key(0), dimexp=False, wasym=False, kappa=1., dim_out=2, sigma=0., 
-                 orderbias=False, channels_in=1, normweights=False):
+    def __init__(self, key=jax.random.key(0), dimexp=False, wasym=False, kappa=1., dim_out=2, 
+                 sigma=0., channels_in=1, normweights=False):
         # Some params
         super().__init__()
         # Dimension expansion params
@@ -310,11 +296,11 @@ class LeNet(nnx.Module):
         self.dimexp = dimexp
         # Layers
         keys = jax.random.split(key, 5)
-        self.conv1 = AsymConv(channels_in, 8, (4,4), keys[0], wasym, kappa, sigma, orderbias, normweights,  padding="VALID")
-        self.conv2 = AsymConv(8, 16, (4,4), keys[1], wasym, kappa, sigma, orderbias, normweights, padding="VALID")
-        self.fc1 = AsymLinear(flat_dim, 128, keys[2], wasym, kappa, sigma, orderbias, normweights)
-        self.fc2 = AsymLinear(128, 64, keys[3], wasym, kappa, sigma, orderbias, normweights)
-        self.fc3 = AsymLinear(64, dim_out, keys[4], wasym, kappa, sigma, orderbias, normweights=False)
+        self.conv1 = AsymConv(channels_in, 8, (4,4), keys[0], wasym, kappa, sigma, normweights,  padding="VALID")
+        self.conv2 = AsymConv(8, 16, (4,4), keys[1], wasym, kappa, sigma, normweights, padding="VALID")
+        self.fc1 = AsymLinear(flat_dim, 128, keys[2], wasym, kappa, sigma, normweights)
+        self.fc2 = AsymLinear(128, 64, keys[3], wasym, kappa, sigma, normweights)
+        self.fc3 = AsymLinear(64, dim_out, keys[4], wasym, kappa, sigma, normweights=False)
     
     def __call__(self, x, z, train=None):
         # Apply dimension expansion if desired
