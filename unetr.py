@@ -14,29 +14,23 @@ class AsymLinear(AsymLinear):
 
 class AsymConvTranspose(AsymConv):
     def __call__(self, inputs:jax.Array) -> jax.Array:
-        bias = self.bias
-        kernel = self.kernel
-        # Apply SyRe (before wasym to avoid biasing the masked weights)
-        if self.ssigma>0.:
-            if self.use_bias: bias = bias + self.randb * self.ssigma
-            kernel = kernel + self.randk * self.ssigma
-        # Order bias to counter permutation symmetry
-        if self.orderbias: bias = jnp.concatenate([
-            bias[0:1],
-            jnp.cumsum(jnp.exp(bias[1:])) + bias[0:1]
-        ])
-        # Apply w-asymmetry
+        # Apply w-asymmetry (overwriting the param's value to bypass the graph)
         if self.wasym:
-            kernel = kernel * self.wmask + (1-self.wmask) * self.randk * self.kappa
+            self.kernel.value = self.kernel.value * self.wmask + (1-self.wmask) * self.randk * self.kappa
         # Normalize kernel to unit norm per output neuron
         if self.normweights:
-            norm = jnp.linalg.norm(kernel.reshape(-1, self.out_features), axis=0, keepdims=True)
-            kernel /= norm
-            if self.use_bias: bias /= norm.squeeze()
-        # Implementation directly copied from nnx.Conv
+            norm = jnp.linalg.norm(jnp.reshape(self.kernel.value, (-1, self.out_features)), axis=0, keepdims=True)
+            self.kernel.value /= norm
+            if self.use_bias: self.bias.value /= norm.squeeze()
+        # Convert to computation dtype without overwriting internal dtype
         inputs, kernel, bias = self.promote_dtype(
-            (inputs, kernel, bias), dtype=self.dtype
+            (inputs, self.kernel, self.bias), dtype=self.dtype
         )
+        # Apply SyRe (not overwriting the param's value to avoid re-biasing)
+        if self.syre:
+            if self.use_bias: bias = bias + self.randb * self.ssigma
+            kernel = kernel + self.randk * self.ssigma
+        # Implementation directly copied from nnx.Conv           
         y = jax.lax.conv_transpose(
             inputs,
             kernel,
