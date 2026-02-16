@@ -40,44 +40,46 @@ class AsymLinear(nnx.Linear):
         keys = jax.random.split(key, 4)
         super().__init__(in_features, out_features, rngs=kwargs.pop("rngs",nnx.Rngs(keys[0])), use_bias=True, **kwargs)
         # Check if asymmetry is to be applied
-        self.ssigma = sigma
+        assert (bool(wasym) + bool(sigma) + bool(normweights))<2, "Currently only tested with one symmetry elimination method."
+        self.syre = bool(sigma)
+        self.ssigma = jnp.asarray(sigma, dtype=self.param_dtype)
         self.wasym = bool(wasym)
-        self.kappa = kappa
-        self.normweights = normweights
+        self.kappa = jnp.asarray(kappa, dtype=self.param_dtype)
+        self.normweights = bool(normweights)
         # Create asymmetry params
         if self.wasym: self.wmask = NonTrainable(mask_linear_densest(*self.kernel.shape, dtype=self.param_dtype))
         if sigma>0. or self.wasym: self.randk = NonTrainable(jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype))
         if sigma>0.: self.randb = NonTrainable(jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype))
 
     def __call__(self, inputs:jax.Array, norm_prev:jax.Array=None) -> jax.Array:
-        bias = self.bias
-        kernel = self.kernel
-        # Apply SyRe (before wasym to avoid biasing the masked weights)
-        if self.ssigma>0.:
-            bias = bias + self.randb * self.ssigma
-            kernel = kernel + self.randk * self.ssigma
-        # Apply w-asymmetry
+        # Apply w-asymmetry (overwriting the param's value to bypass the graph)
         if self.wasym:
-            kernel = kernel * self.wmask + (1-self.wmask) * self.randk * self.kappa
+            self.kernel.value = self.kernel.value * self.wmask + (1-self.wmask) * self.randk * self.kappa
         # Normalize kernel to unit norm per output neuron
         if norm_prev is not None:
-            kernel = kernel*norm_prev[:,None]
+            self.kernel.value = self.kernel.value*norm_prev[:,None]
         if self.normweights:
-            norm = jnp.linalg.norm(kernel, axis=0)
-            kernel = kernel / norm
-            if self.use_bias: bias /= norm
+            norm = jnp.linalg.norm(self.kernel.value, axis=0)
+            self.kernel.value = self.kernel.value / norm
+            if self.use_bias: self.bias.value /= norm
         else: norm = None
-        # Implementation directly copied from nnx.Linear
+        # Convert to computation dtype without overwriting internal dtype
         inputs, kernel, bias = self.promote_dtype(
-            (inputs, kernel, bias), dtype=self.dtype
-        )
+            (inputs, self.kernel, self.bias), dtype=self.dtype
+        )        
+        # Apply SyRe (not overwriting the param's value to avoid re-biasing)
+        if self.syre:
+            if self.use_bias: bias = bias + self.randb * self.ssigma
+            kernel = kernel + self.randk * self.ssigma
+        # Implementation directly copied from nnx.Linear
         y = self.dot_general(
             inputs,
             kernel,
             (((inputs.ndim - 1,), (0,)), ((), ())),
             precision=self.precision,
         )
-        y += jnp.reshape(bias, (1,) * (y.ndim - 1) + (-1,))
+        if self.use_bias: 
+            y += jnp.reshape(bias, (1,) * (y.ndim - 1) + (-1,))
         return y, norm
 
 # Creates mask with the maximum number of non-zero weights while ensuring that each row is unique
@@ -107,9 +109,11 @@ class AsymConv(nnx.Conv):
         keys = jax.random.split(key, 4)
         super().__init__(in_features, out_features, kernel_size, rngs=kwargs.pop("rngs", nnx.Rngs(keys[0])), **kwargs)
         # Check if asymmetry is to be applied
-        self.ssigma = sigma
+        assert (bool(wasym) + bool(sigma) + bool(normweights))<2, "Currently only tested with one symmetry elimination method."
+        self.syre = bool(sigma)
+        self.ssigma = jnp.asarray(sigma, dtype=self.param_dtype)
         self.wasym = bool(wasym)
-        self.kappa = kappa
+        self.kappa = jnp.asarray(kappa, dtype=self.param_dtype)
         self.normweights = normweights
         self.maybe_broadcast = lambda x: (x,) * len(self.kernel_size) if isinstance(x, int) else tuple(x)
         # Create asymmetry params
@@ -118,27 +122,26 @@ class AsymConv(nnx.Conv):
         if sigma>0. and self.use_bias: self.randb = NonTrainable(jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype))
 
     def __call__(self, inputs:jax.Array, norm_prev:jax.Array=None) -> jax.Array:
-        bias = self.bias
-        kernel = self.kernel
-        # Apply SyRe (before wasym to avoid biasing the masked weights)
-        if self.ssigma>0.:
-            if self.use_bias: bias = bias + self.randb * self.ssigma
-            kernel = kernel + self.randk * self.ssigma
-        # Apply w-asymmetry
+        # Apply w-asymmetry (overwriting the param's value to bypass the graph)
         if self.wasym:
-            kernel = kernel * self.wmask + (1-self.wmask) * self.randk * self.kappa
+            self.kernel.value = self.kernel.value * self.wmask + (1-self.wmask) * self.randk * self.kappa
         # Normalize kernel to unit norm per output neuron
         if norm_prev is not None:
-            kernel = kernel*norm_prev[:,None]
+            self.kernel.value = self.kernel.value*norm_prev[:,None]
         if self.normweights:
-            norm = jnp.linalg.norm(jnp.reshape(kernel, (-1, self.out_features)), axis=0)
-            kernel = kernel / norm
-            if self.use_bias: bias /= norm
+            norm = jnp.linalg.norm(jnp.reshape(self.kernel.value, (-1, self.out_features)), axis=0)
+            self.kernel.value = self.kernel.value / norm
+            if self.use_bias: self.bias.value = self.bias.value / norm
         else: norm = None
-        # Implementation directly copied from nnx.Conv
+        # Convert to computation dtype without overwriting internal dtype
         inputs, kernel, bias = self.promote_dtype(
-            (inputs, kernel, bias), dtype=self.dtype
+            (inputs, self.kernel, self.bias), dtype=self.dtype
         )
+        # Apply SyRe (not overwriting the param's value to avoid re-biasing)
+        if self.syre:
+            if self.use_bias: bias = bias + self.randb * self.ssigma
+            kernel = kernel + self.randk * self.ssigma
+        # Implementation directly copied from nnx.Conv
         y = self.conv_general_dilated(
             inputs,
             kernel,
