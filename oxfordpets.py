@@ -14,7 +14,7 @@ from functools import reduce
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train a UNETR on Oxford Pets in a federated setting")
     parser.add_argument("--n_clients", type=int, default=4, help="Number of clients to simulate")
-    parser.add_argument("--asymtype", type=str, default="", choices=["", "wasym", "syre", "normweights", "orderbias"], help="Type of symmetry elimination to use")
+    parser.add_argument("--asymtype", type=str, default="", choices=["", "wasym", "syre", "normweights", "dimexp"], help="Type of symmetry elimination to use")
     args = parser.parse_args()
     n_clients = args.n_clients
     asymkwargs = {"key":jax.random.key(42)}
@@ -26,8 +26,8 @@ if __name__ == "__main__":
         asymkwargs["sigma"] = 1e-4
     elif args.asymtype == "normweights":
         asymkwargs["normweights"] = True
-    elif args.asymtype == "orderbias":
-        asymkwargs["orderbias"] = True
+    elif args.asymtype == "dimexp":
+        asymkwargs["dimexp"] = 1
     model_name = f"models/oxford_{args.asymtype or ('central' if n_clients==1 else 'base')}.pkl"
 
     # Initialize model
