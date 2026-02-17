@@ -28,7 +28,7 @@ if __name__ == "__main__":
         asymkwargs["normweights"] = True
     elif args.asymtype == "dimexp":
         asymkwargs["dimexp"] = 1
-    model_name = f"models/oxford_{args.asymtype or ('central' if n_clients==1 else 'base')}.pkl"
+    model_name = f"/data/bucket/traincombmodels/models/oxford_{args.asymtype or ('central' if n_clients==1 else 'base')}.pkl"
 
     # Initialize model
     model_init = UNETR(20, img_size=224, **asymkwargs)

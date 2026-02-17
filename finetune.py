@@ -28,7 +28,7 @@ elif args.asymtype == "normweights":
     asymkwargs["normweights"] = True
 elif args.asymtype == "dimexp":
     asymkwargs["dimexp"] = 1
-model_name = f"models/celeba_{args.asymtype or ('central' if n_clients==1 else 'base')}.pkl"
+model_name = f"/data/bucket/traincombmodels/models/celeba_{args.asymtype or ('central' if n_clients==1 else 'base')}.pkl"
 
 # Load Google's ViT as backbone and attach head, mixing flax.linen and flax.nnx
 class Classifier(nnx.Module):
