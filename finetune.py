@@ -1,5 +1,6 @@
 import os
 os.environ["XLA_FLAGS"] = " --xla_gpu_strict_conv_algorithm_picker=false"
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 from fedflax import train
 from models import fetch_vit, AsymLinear, interleave
 from data import fetch_data
@@ -37,7 +38,7 @@ class Classifier(nnx.Module):
         self.dimexp = asymkwargs.get("dimexp", 1)
         img_size = 224*self.dimexp
         self.backbone, self.bbparams = fetch_vit(img_size=img_size)
-        self.bbparams = jax.tree.map(nnx.Param, self.bbparams)
+        self.bbparams = nnx.data(jax.tree.map(nnx.Param, self.bbparams))
         keys = jax.random.split(key, 3)
         self.fc1 = AsymLinear(768, 512, key=keys[0], **asymkwargs)
         self.fc2 = AsymLinear(512, 128, key=keys[1], **asymkwargs)
