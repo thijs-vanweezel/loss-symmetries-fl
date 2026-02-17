@@ -63,7 +63,8 @@ opt = nnx.Optimizer(
     optax.chain(
         optax.masked(optax.adam(1e-5), lambda ptree: jax.tree.map_with_path(lambda path, _p: any("bbparams" in str(part) for part in path), ptree)),
         optax.masked(optax.adam(lr), lambda ptree: jax.tree.map_with_path(lambda path, _p: not any("bbparams" in str(part) for part in path), ptree))
-    )
+    ),
+    wrt=nnx.Param
 )
 
 # Cityscapes data
