@@ -249,7 +249,7 @@ class ResNetBlock(nnx.Module):
 # Resnet for ImageNet ([3,4,6,3] for 34 layers, [2,2,2,2] for 18 layers)
 class ResNet(nnx.Module):
     def __init__(self, key=jax.random.key(0), layers:tuple[int,...]=[2,2,2,2], kernels:tuple[int,...]=[64,128,256,512], 
-                 channels_in:int=3, dim_out:int=1000, dimexp:bool=False, wasym:bool=False, kappa:float=1., sigma:float=0., 
+                 channels_in:int=3, dim_out:int=1000, dimexp:int=1, wasym:bool=False, kappa:float=1., sigma:float=0., 
                  normweights:bool=False, **kwargs):
         assert len(layers)==len(kernels)
         # Set some params
@@ -273,7 +273,7 @@ class ResNet(nnx.Module):
                              param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
     def __call__(self, x, train=True):
         # Apply dimension expansion if desired
-        x = x if not self.dimexp else interleave(x)
+        if self.dimexp>1: x=interleave(x, k=self.dimexp)
         # Forward pass
         x, norm = self.conv(x)
         x = nnx.max_pool(x, window_shape=(3,3), strides=(2,2), padding="SAME")
@@ -287,7 +287,7 @@ class ResNet(nnx.Module):
 
 # LeNet-5 for 36X60 images + 3 auxiliary features
 class LeNet(nnx.Module):
-    def __init__(self, key=jax.random.key(0), dimexp=False, wasym=False, kappa=1., dim_out=2, 
+    def __init__(self, key=jax.random.key(0), dimexp=1, wasym=False, kappa=1., dim_out=2, 
                  sigma=0., channels_in=1, normweights=False):
         # Some params
         super().__init__()
@@ -305,7 +305,7 @@ class LeNet(nnx.Module):
     
     def __call__(self, x, z, train=None):
         # Apply dimension expansion if desired
-        x = x if not self.dimexp else interleave(x)
+        if self.dimexp>1: x=interleave(x, k=self.dimexp)
         # Forward pass
         x, norm = self.conv1(x)
         x = nnx.relu(x)
@@ -335,7 +335,7 @@ defaultconfig = ConfigDict({
     "representation_size": None,
     "hidden_size": 768
 })
-def fetch_vit(path="models/ViT-B_16.npz", config=defaultconfig):
+def fetch_vit(img_size=224, path="models/ViT-B_16.npz", config=defaultconfig):
     """
     The weights for the backbone are available at https://console.cloud.google.com/storage/browser/vit_models/imagenet21k. 
     Any version should do, if you change the config accordingly.
@@ -351,7 +351,7 @@ def fetch_vit(path="models/ViT-B_16.npz", config=defaultconfig):
         e.msg += "\nInstall vit_jax with flag `--no-deps` from https://github.com/google-research/vision_transformer"
     
     model = VisionTransformer(**config)
-    reference_params = model.init(jax.random.key(42), jnp.ones((1,224,224,3), jnp.bfloat16), train=False)["params"]
+    reference_params = model.init(jax.random.key(42), jnp.ones((1,img_size,img_size,3), jnp.bfloat16), train=False)["params"]
     # Dumbed down version of `load_pretrained` removing unused parameters
     # Also converts to bfloat16
     # Case where posemb_new.shape!=posemb.shape is not handled
