@@ -61,33 +61,35 @@ class MPIIGaze(Dataset):
         return label, img, aux
 
 class ImageNet(Dataset):
-    def __init__(self, path:str="/data/bucket/traincombmodels/imagenet/ILSVRC/Data/DET/", partition:str="train", n_clients:int=4, n_classes:int=1000):
+    def __init__(self, path:str="/data/bucket/traincombmodels/imnetproc", partition:str="train", n_clients:int=4, 
+                 n_classes:int=1000, originalpath:str="/data/bucket/traincombmodels/imagenet"):
+        if not os.path.exists(path):
+            self.repartition(originalpath, path)
         self.partition = partition
-        g = os.walk(os.path.join(path, partition))
+        g = os.walk(os.path.join(path, "Data", "CLS-LOC", partition))
+        _ = next(g)
         # Get class names and limit to n_classes by skipping
-        classes = next(g)[1]
+        with open(os.path.join(path, "mapping.txt")) as f:
+            classes = f.readlines()
         classes = classes[::len(classes)//n_classes]
-        # Dedicate a client to each class
-        k, m = divmod(len(classes), n_clients)
-        class_splits = {classes[idx]: client for client in range(n_clients) for idx in range(client*k+min(client,m), (client+1)*k+min(client+1,m))}
+        classes = {line.split()[0]: i for i, line in enumerate(classes)}
         # Assign sample paths to each client
         self.data = {c: [] for c in range(n_clients)}
-        label_idx = 0
+        client = 0
         for dirname, _, filelist in g:
             classname = os.path.basename(dirname)
             # Only n_classes
-            if classname in classes:
-                # Assign to client
-                client = class_splits[classname]
+            if classname in classes.keys():
+                class_idx = classes[classname]
                 # Insert at interleaved indices so that samples are not ordered by class (note: deterministic)
                 for i, file in enumerate(filelist):
                     img = PIL.Image.open(os.path.join(dirname, file)).convert("RGB")
                     img = torchvision.transforms.functional.resize(img, 256)
                     self.data[client].insert(
-                        i*(label_idx-n_classes//n_clients*client), 
-                        (label_idx, img)
+                        i*(class_idx-n_classes//n_clients*client), 
+                        (class_idx, img)
                     )
-                label_idx += 1
+                client = (client+1) % n_clients
         # Misc attributes
         self.n_clients = n_clients
         self.n_classes = n_classes
@@ -105,6 +107,21 @@ class ImageNet(Dataset):
             torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
+    def repartition(self, originalpath, newpath, train_frac=0.8):
+        """Divides the train partition into train/val/test"""
+        os.mkdir(os.path.join(newpath, "train"))
+        os.mkdir(os.path.join(newpath, "val"))
+        os.mkdir(os.path.join(newpath, "test"))
+        for classname in os.listdir(os.path.join(originalpath, "Data", "CLS-LOC", "train")):
+            os.mkdir(os.path.join(newpath, "train", classname))
+            os.mkdir(os.path.join(newpath, "val", classname))
+            os.mkdir(os.path.join(newpath, "test", classname))
+            files = os.listdir(os.path.join(originalpath, "Data", "CLS-LOC", "train", classname))
+            for i, file in enumerate(files):
+                partition = "train" if i<len(files)*train_frac else \
+                "val" if i<len(files)*(train_frac+(1-train_frac)/2) else "test"
+                shutil.copy(os.path.join(originalpath, "Data", "CLS-LOC", "train", classname, file), os.path.join(newpath, partition, classname))
+    
     def __len__(self):
         # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
         return min([len(files) for files in self.data.values()])*self.n_clients
@@ -331,6 +348,7 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
         **kwargs
 
     )
+
 
 
 
