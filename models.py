@@ -335,7 +335,7 @@ defaultconfig = ConfigDict({
     "representation_size": None,
     "hidden_size": 768
 })
-def fetch_vit(img_size=224, path="models/ViT-B_16.npz", config=defaultconfig):
+def fetch_vit(img_size=224, path="/data/bucket/traincombmodels/models/ViT-B_16.npz", config=defaultconfig):
     """
     The weights for the backbone are available at https://console.cloud.google.com/storage/browser/vit_models/imagenet21k. 
     Any version should do, if you change the config accordingly.
@@ -365,4 +365,5 @@ def fetch_vit(img_size=224, path="models/ViT-B_16.npz", config=defaultconfig):
         params.pop(key)
     params = flax.core.freeze(params)
     # Return linen model
+
     return model, params
