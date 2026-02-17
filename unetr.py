@@ -3,7 +3,11 @@ from jax import numpy as jnp
 from flax import nnx
 import jax
 from typing import Callable
-from models import AsymConv, AsymLinear
+from models import AsymConv, AsymLinear, interleave
+
+@jax.vmap
+def uninterleave(x:jax.Array, k=2):
+    return x[::k, ::k]
 
 class AsymConv(AsymConv):
     def __call__(self, x:jax.Array):
@@ -466,7 +470,9 @@ class UNETR(nnx.Module):
     ):
         if hidden_size % num_heads != 0:
             raise ValueError("hidden_size should be divisible by num_heads.")
-
+        
+        self.dimexp = asymkwargs.get("dimexp", 1)
+        img_size *= self.dimexp
         self.num_layers = 12
         self.patch_size = 16
         self.feat_size = img_size // self.patch_size
@@ -586,6 +592,7 @@ class UNETR(nnx.Module):
         return x
 
     def __call__(self, x_in: jax.Array, train:bool=None) -> jax.Array:
+        if self.dimexp > 1: x_in=interleave(x_in, self.dimexp)
         x, hidden_states_out = self.vit(x_in)
         enc1 = self.encoder1(x_in)
         x2 = hidden_states_out[3]
@@ -598,5 +605,7 @@ class UNETR(nnx.Module):
         dec3 = self.decoder5(dec4, enc4)
         dec2 = self.decoder4(dec3, enc3)
         dec1 = self.decoder3(dec2, enc2)
-        out = self.decoder2(dec1, enc1)
-        return self.out(out)
+        dec = self.decoder2(dec1, enc1)
+        x_out = self.out(dec)
+        if self.dimexp > 1: x_out=uninterleave(x_out, self.dimexp)
+        return x_out
