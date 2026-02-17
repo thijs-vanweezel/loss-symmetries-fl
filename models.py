@@ -40,14 +40,14 @@ class AsymLinear(nnx.Linear):
         # Check if asymmetry is to be applied
         assert (bool(wasym) + bool(sigma) + bool(normweights))<2, "Currently only tested with one symmetry elimination method."
         self.syre = bool(sigma)
-        self.ssigma = jnp.asarray(sigma, dtype=self.param_dtype)
-        self.wasym = bool(wasym)
-        self.kappa = jnp.asarray(kappa, dtype=self.param_dtype)
+        self.ssigma = sigma
+        self.wasym = wasym
+        self.kappa = kappa
         self.normweights = bool(normweights)
         # Create asymmetry params
         if self.wasym: self.wmask = NonTrainable(mask_linear_densest(*self.kernel.shape, dtype=self.param_dtype))
-        if sigma>0. or self.wasym: self.randk = NonTrainable(jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype))
-        if sigma>0.: self.randb = NonTrainable(jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype))
+        if self.syre or self.wasym: self.randk = NonTrainable(jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype))
+        if self.syre: self.randb = NonTrainable(jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype))
 
     def __call__(self, inputs:jax.Array, norm_prev:jax.Array=None) -> jax.Array:
         # Apply w-asymmetry (overwriting the param's value to bypass the graph)
@@ -109,15 +109,15 @@ class AsymConv(nnx.Conv):
         # Check if asymmetry is to be applied
         assert (bool(wasym) + bool(sigma) + bool(normweights))<2, "Currently only tested with one symmetry elimination method."
         self.syre = bool(sigma)
-        self.ssigma = jnp.asarray(sigma, dtype=self.param_dtype)
-        self.wasym = bool(wasym)
-        self.kappa = jnp.asarray(kappa, dtype=self.param_dtype)
+        self.ssigma = sigma
+        self.wasym = wasym
+        self.kappa = kappa
         self.normweights = normweights
         self.maybe_broadcast = lambda x: (x,) * len(self.kernel_size) if isinstance(x, int) else tuple(x)
         # Create asymmetry params
         if self.wasym: self.wmask = NonTrainable(mask_conv_densest(*self.kernel.shape[1:], dtype=self.param_dtype))
-        if sigma>0. or self.wasym: self.randk = NonTrainable(jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype))
-        if sigma>0. and self.use_bias: self.randb = NonTrainable(jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype))
+        if self.syre or self.wasym: self.randk = NonTrainable(jax.random.normal(keys[2], self.kernel.shape, dtype=self.param_dtype))
+        if self.syre and self.use_bias: self.randb = NonTrainable(jax.random.normal(keys[3], self.bias.shape, dtype=self.param_dtype))
 
     def __call__(self, inputs:jax.Array, norm_prev:jax.Array=None) -> jax.Array:
         # Apply w-asymmetry (overwriting the param's value to bypass the graph)
