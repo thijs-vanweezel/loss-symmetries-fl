@@ -30,8 +30,9 @@ def preprocess(original_path="MPIIGaze/MPIIGaze/Data/Normalized", new_path="MPII
             os.remove(os.path.join(new_path, person, mat))
 
 class MPIIGaze(Dataset):
-    def __init__(self, path:str, n_clients:int):
+    def __init__(self, path:str="MPIIGaze_preprocessed", n_clients:int=4, partition:str="train"):
         # Each client gets data from one participant
+        path = os.path.join(path, partition)
         g = os.walk(path)
         self.clients = next(g)[1][:n_clients]
         self.files = {c: [] for c in self.clients}
@@ -60,7 +61,7 @@ class MPIIGaze(Dataset):
         return label, img, aux
 
 class ImageNet(Dataset):
-    def __init__(self, path:str="./imagenet/Data/CLS-LOC/", partition:str="train", n_clients:int=4, n_classes:int=1000):
+    def __init__(self, path:str="/data/bucket/traincombmodels/imagenet/ILSVRC/Data/DET/", partition:str="train", n_clients:int=4, n_classes:int=1000):
         self.partition = partition
         g = os.walk(os.path.join(path, partition))
         # Get class names and limit to n_classes by skipping
@@ -121,7 +122,7 @@ class ImageNet(Dataset):
         return label, img
 
 class OxfordPets(Dataset):
-    def __init__(self, path:str="oxford_pets", partition="train", seed=None, n_clients=4):
+    def __init__(self, path:str="/data/bucket/traincombmodels/oxford_pets", partition="train", seed=None, n_clients=4):
         self.n_clients = n_clients
         self.partition = partition
         if seed is not None: self.seed = seed 
@@ -194,7 +195,7 @@ class OxfordPets(Dataset):
         return mask, img
 
 class CelebA(Dataset):
-    def __init__(self, path:str="celeba", partition="train", n_clients=4):
+    def __init__(self, path:str="/data/bucket/traincombmodels/celeba", partition="train", n_clients=4):
         self.n_clients = n_clients
         self.partition = partition
         # Load filenames and race
@@ -308,16 +309,16 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
         new_beta = round(beta * new_batch_size / n_clients) * n_clients / new_batch_size
     # Dataset type
     if dataset==0:
-        dataset = MPIIGaze(n_clients=n_clients, path=os.path.join("MPIIGaze_preprocessed", partition))
+        dataset = MPIIGaze(n_clients=n_clients, partition=partition)
         assert skew in ["feature", "overlap", "label"], "Skew must be one of 'feature', 'overlap', or 'label'. For no skew, specify beta=0."
     elif dataset==1:
-        dataset = ImageNet(path="imagenet/Data/CLS-LOC", partition=partition, n_clients=n_clients, n_classes=n_classes)
+        dataset = ImageNet(partition=partition, n_clients=n_clients, n_classes=n_classes)
         assert skew in ["overlap", "label"], "Skew must be either 'overlap' or 'label'. For no skew, specify beta=0."
     elif dataset==2:
-        dataset = OxfordPets(path="oxford_pets/", partition=partition, n_clients=n_clients)
+        dataset = OxfordPets(partition=partition, n_clients=n_clients)
         assert skew in ["overlap", "feature"], "Skew must be either 'overlap' or 'feature'. For no skew, specify beta=0."
     elif dataset==3:
-        dataset = CelebA(path="celeba/", partition=partition, n_clients=n_clients)
+        dataset = CelebA(partition=partition, n_clients=n_clients)
         assert skew in ["overlap", "label"], "Skew must be either 'overlap' or 'label'. For no skew, specify beta=0."
     collate = partial(jax_collate, n_clients=n_clients, beta=new_beta, skew=skew)
     # Iterable batches
