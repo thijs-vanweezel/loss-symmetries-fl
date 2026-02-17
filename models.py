@@ -1,18 +1,16 @@
 from flax import nnx
 from jax import numpy as jnp
-from itertools import chain, combinations
+from itertools import combinations
 from flax.nnx.nn.linear import _conv_dimension_numbers
 import jax, flax, sys, importlib, warnings
-from functools import partial
 from ml_collections.config_dict import ConfigDict
 
 # Dimension expansion
 @jax.vmap
-def interleave(img, fill_value=.5):
-    img = jnp.repeat(img, 2, axis=0)
-    img = jnp.repeat(img, 2, axis=1)
-    img = img.at[::2].set(fill_value)
-    img = img.at[:, ::2].set(fill_value)
+def interleave(img, k=2, fill_value=.5):
+    img = (fill_value*jnp.ones(
+        (img.shape[0]*k, img.shape[1]*k, img.shape[2])
+    )).at[::k, ::k].set(img)
     return img
 
 class NonTrainable(nnx.Variable):
