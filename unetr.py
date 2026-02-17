@@ -471,7 +471,7 @@ class UNETR(nnx.Module):
         if hidden_size % num_heads != 0:
             raise ValueError("hidden_size should be divisible by num_heads.")
         
-        self.dimexp = asymkwargs.get("dimexp", 1)
+        self.dimexp = asymkwargs.pop("dimexp", 1)
         img_size *= self.dimexp
         self.num_layers = 12
         self.patch_size = 16
