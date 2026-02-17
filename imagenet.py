@@ -5,7 +5,7 @@ from flax import nnx
 from models import ResNet
 from data import fetch_data
 from functools import reduce
-from utils import opt_create, return_ce, top_5_err, functional_drift, save_model, load_model, err_fn
+from utils import return_ce, top_5_err, functional_drift, save_model, load_model, err_fn
 
 n_clients = 1 # choose 1 for centralized training
 n_classes = 1000 # choose, e.g., 100 for ImageNet-100
@@ -18,8 +18,13 @@ ds_test = fetch_data(partition="test", beta=1., skew="label", dataset=1, n_clien
 
 model_init = ResNet(jax.random.key(42), dim_out=n_classes, layers=architecture, **asymkwargs)
 lr = optax.warmup_exponential_decay_schedule(1e-4, .1, 4000, 1000, .9, end_value=1e-5)
+opt = nnx.Optimizer(
+    model_init,
+    optax.adam(lr),
+    wrt=nnx.Param
+)
 
-models, _ = train(model_init, opt_create(model_init, learning_rate=lr), ds_train, return_ce(0.), ds_val, 
+models, _ = train(model_init, opt, ds_train, return_ce(0.), ds_val, 
                   local_epochs="early", rounds="early" if n_clients>1 else 1, max_patience=3, val_fn=top_5_err, n_clients=n_clients);
 
 # Save model
