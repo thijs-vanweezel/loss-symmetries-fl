@@ -41,7 +41,6 @@ else:
 # Get data
 ds_train = fetch_data(beta=1., skew="label", dataset=1, n_clients=n_clients, n_classes=n_classes)
 ds_val = fetch_data(partition="val", beta=1., skew="label", dataset=1, n_clients=n_clients, n_classes=n_classes)
-ds_test = fetch_data(partition="test", beta=1., skew="label", dataset=1, n_clients=n_clients, n_classes=n_classes)
 
 # Initialize model and optimizer
 model_init = ResNet(jax.random.key(42), dim_out=n_classes, layers=layers, **asymkwargs)
@@ -68,6 +67,10 @@ models = load_model(
 # Aggregate
 updates = get_updates(model_init, models)
 model_g = aggregate(model_init, updates)
+
+# Load test data
+del ds_train, ds_val
+ds_test = fetch_data(partition="test", beta=1., skew="label", dataset=1, n_clients=n_clients, n_classes=n_classes)
 
 # Evaluate global performance
 vval_fn = nnx.jit(nnx.vmap(top_5_err, in_axes=(None,0,0)))
