@@ -1,5 +1,6 @@
 import os
 os.environ["XLA_FLAGS"] = " --xla_gpu_strict_conv_algorithm_picker=false"
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 from fedflax import train, aggregate, get_updates
 import jax, optax, argparse
 from jax import numpy as jnp
