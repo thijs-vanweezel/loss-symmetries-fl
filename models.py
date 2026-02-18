@@ -290,7 +290,7 @@ class LeNet(nnx.Module):
         # Some params
         super().__init__()
         # Dimension expansion params
-        self.flat_shape = (15,27) if dimexp else (6,12)
+        self.flat_shape = (6*dimexp,12*dimexp)
         flat_dim = self.flat_shape[0]*self.flat_shape[1]*16 + 3
         self.dimexp = dimexp
         # Layers
