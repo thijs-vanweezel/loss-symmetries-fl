@@ -92,10 +92,7 @@ class ImageNet(Dataset):
             self.seed.manual_seed(42)
         # Augmentations
         self.val_crop = torchvision.transforms.CenterCrop(224)
-        self.convert = torchvision.transforms.Compose([
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
+        self.normalize = torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         # Create split
         if not os.path.exists(path):
             self.repartition(originalpath, path)
@@ -110,18 +107,21 @@ class ImageNet(Dataset):
         # Assign sample paths to each client
         self.data = {c: [] for c in range(n_clients)}
         client = 0
-        for dirname, _, filelist in tqdm(g, leave=False):
+        for dirname, _, filelist in tqdm(g, leave=False, total=n_classes):
             classname = os.path.basename(dirname)
             # Only n_classes
             if classname in classes.keys():
                 class_idx = classes[classname]
                 # Insert at interleaved indices so that samples are not ordered by class (note: deterministic)
                 for i, file in enumerate(filelist):
-                    img = PIL.Image.open(os.path.join(dirname, file)).convert("RGB")
+                    with open(os.path.join(dirname, file), "rb") as f:
+                        bytesdata = torch.frombuffer(f.read(), dtype=torch.uint8)
+                    img = torchvision.io.decode_jpeg(bytesdata, mode="RGB").half() / 255.
                     img = torchvision.transforms.functional.resize(img, 256)
+                    img = self.normalize(img)
                     self.data[client].insert(
                         i*(class_idx-n_classes//n_clients*client), 
-                        (class_idx, self.convert(img))
+                        (class_idx, img)
                     )
                 client = (client+1) % n_clients
         # Misc attributes
@@ -227,7 +227,6 @@ class CelebA(Dataset):
             self.seed.manual_seed(42)
         # Augmentations
         self.val_crop = torchvision.transforms.CenterCrop(224)
-        self.convert = torchvision.transforms.ToTensor()
         # Load filenames and race
         with open(os.path.join(path, "identity_CelebA.txt")) as f:
             persons = f.readlines()
@@ -248,9 +247,11 @@ class CelebA(Dataset):
             c = (c+1) % n_clients
             # One-hot encoded label
             label = torch.tensor([(int(attrib)+1)//2 for attrib in attribs])
-            img = PIL.Image.open(os.path.join(path, "images", filename)).convert("RGB")
+            with open(os.path.join(path, "images", filename), "rb") as f:
+                      bytesdata = torch.frombuffer(f.read(), dtype=torch.uint8)
+            img = torchvision.io.decode_jpeg(bytesdata, mode="RGB").half() / 255.
             img = torchvision.transforms.functional.resize(img, 256)
-            self.files[client].append((self.convert(img), label))
+            self.files[client].append((img, label))
         
     def __len__(self):
         # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
@@ -279,9 +280,9 @@ def jax_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray, 
     """
     # Collect, convert, and concat
     labels, imgs, *auxs = zip(*batch)
-    imgs = jnp.stack([jnp.asarray(img, dtype=jnp.float32) for img in imgs])
+    imgs = jnp.stack([jnp.asarray(img) for img in imgs])
     labels = jnp.stack([jnp.asarray(label) for label in labels])
-    if gaze:=bool(auxs): auxs = jnp.stack([jnp.asarray(aux, dtype=jnp.float32) for aux in auxs[0]])
+    if gaze:=bool(auxs): auxs = jnp.stack([jnp.asarray(aux) for aux in auxs[0]])
 
     # Feature skew, by drawing a portion of the samples from the same feature distribution
     # Feature groups are interleaved by the Dataset
@@ -352,6 +353,7 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
         **kwargs
 
     )
+
 
 
 
