@@ -187,13 +187,12 @@ class ResNetBlock(nnx.Module):
             wasym,
             kappa,
             sigma,
-            False, # no bias due to subsequent BN
             normweights,
             strides=(stride,stride),
             padding="SAME",
             param_dtype=jnp.bfloat16,
             dtype=jnp.bfloat16,
-            use_bias=False
+            use_bias=False # due to subsequent BN
         )
         self.norm2 = AsymBatchNorm(normweights, num_features=out_kernels, rngs=nnx.Rngs(keys[3]), param_dtype=jnp.float32, dtype=jnp.bfloat16)
         self.conv2 = AsymConv(
@@ -204,7 +203,6 @@ class ResNetBlock(nnx.Module):
             wasym,
             kappa,
             sigma,
-            False,
             normweights,
             padding="SAME",
             param_dtype=jnp.bfloat16,
@@ -367,3 +365,4 @@ def fetch_vit(img_size=224, path="/data/bucket/traincombmodels/models/ViT-B_16.n
     # Return linen model
 
     return model, params
+
