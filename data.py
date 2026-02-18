@@ -100,7 +100,7 @@ class ImageNet(Dataset):
         if not os.path.exists(path):
             self.repartition(originalpath, path)
         self.partition = partition
-        g = os.walk(os.path.join(path, "Data", "CLS-LOC", partition))
+        g = os.walk(os.path.join(path, partition))
         _ = next(g)
         # Get class names and limit to n_classes by skipping
         with open(os.path.join(path, "mapping.txt")) as f:
@@ -352,6 +352,7 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
         **kwargs
 
     )
+
 
 
 
