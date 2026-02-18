@@ -6,7 +6,7 @@ from functools import partial
 import PIL
 from collections import defaultdict
 
-def train_aug(img, mask=None, seed=None):
+def train_aug(img:torch.Tensor, mask:torch.Tensor=None, seed=None):
     """Deterministic train augmentations"""
     # Flip
     if torch.randint(0, 2, (), generator=seed).item():
@@ -25,31 +25,11 @@ def train_aug(img, mask=None, seed=None):
     img = (img - mean) * contrast + mean
     return img, mask
 
-def preprocess(original_path="MPIIGaze/MPIIGaze/Data/Normalized", new_path="MPIIGaze_preprocessed/"):
-    """Run once."""
-    # Split the MPIIGaze dataset into train/val/test sets.
-    shutil.copytree(original_path, new_path, dirs_exist_ok=True)
-    for person in [p for p in os.listdir(new_path) if p.startswith("p")]:
-        os.makedirs(os.path.join(new_path, "train", person))
-        os.makedirs(os.path.join(new_path, "test", person))
-        os.makedirs(os.path.join(new_path, "val", person))
-        mats = filter(lambda x: x.endswith(".mat"), os.listdir(os.path.join(new_path, person)))
-        # Convert mat files to pt files for faster loading
-        for mat in mats:
-            data = loadmat(os.path.join(new_path, person, mat))
-            for side in ["left", "right"]:
-                datum = data["data"][side].item()
-                for i in range(len(datum["image"].item())):
-                    img = torch.unsqueeze(torch.tensor(datum["image"].item()[i]).float()/255., -1)
-                    pose = torch.tensor(datum["pose"].item()[i]).float()
-                    gaze = torch.tensor(datum["gaze"].item()[i]).float()
-                    # Split over train/val/test with 70/15/15 ratio
-                    partition = [["test", "val"], ["train", "train"]][(i%20-14)//14][i%2]
-                    torch.save((img, pose, gaze), os.path.join(new_path, partition, person, f"{mat[:-4]}_{i}_{side}.pt"))
-            os.remove(os.path.join(new_path, person, mat))
-
 class MPIIGaze(Dataset):
-    def __init__(self, path:str="MPIIGaze_preprocessed", n_clients:int=4, partition:str="train"):
+    def __init__(self, path:str="MPIIGaze_preprocessed", n_clients:int=4, partition:str="train", originalpath:str="MPIIGaze/MPIIGaze/Data/Normalized"):
+        # Create split
+        if not os.path.exists(path):
+            self.preprocess(originalpath, path)
         # Each client gets data from one participant
         path = os.path.join(path, partition)
         g = os.walk(path)
@@ -60,6 +40,29 @@ class MPIIGaze(Dataset):
                 for f in filenames:
                     self.files[os.path.basename(dirname)].append(os.path.join(dirname, f))
         self.n_clients = n_clients
+         
+    @staticmethod
+    def preprocess(original_path:str, new_path:str):
+        # Split the MPIIGaze dataset into train/val/test sets.
+        shutil.copytree(original_path, new_path, dirs_exist_ok=True)
+        for person in [p for p in os.listdir(new_path) if p.startswith("p")]:
+            os.makedirs(os.path.join(new_path, "train", person))
+            os.makedirs(os.path.join(new_path, "test", person))
+            os.makedirs(os.path.join(new_path, "val", person))
+            mats = filter(lambda x: x.endswith(".mat"), os.listdir(os.path.join(new_path, person)))
+            # Convert mat files to pt files for faster loading
+            for mat in mats:
+                data = loadmat(os.path.join(new_path, person, mat))
+                for side in ["left", "right"]:
+                    datum = data["data"][side].item()
+                    for i in range(len(datum["image"].item())):
+                        img = torch.unsqueeze(torch.tensor(datum["image"].item()[i]).float()/255., -1)
+                        pose = torch.tensor(datum["pose"].item()[i]).float()
+                        gaze = torch.tensor(datum["gaze"].item()[i]).float()
+                        # Split over train/val/test with 70/15/15 ratio
+                        partition = [["test", "val"], ["train", "train"]][(i%20-14)//14][i%2]
+                        torch.save((img, pose, gaze), os.path.join(new_path, partition, person, f"{mat[:-4]}_{i}_{side}.pt"))
+                os.remove(os.path.join(new_path, person, mat))
 
     def __len__(self):
         # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
@@ -125,7 +128,8 @@ class ImageNet(Dataset):
             torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
-    def repartition(self, originalpath, newpath, train_frac=0.8):
+    @staticmethod
+    def repartition(originalpath, newpath, train_frac=0.8):
         """Divides the train partition into train/val/test"""
         os.mkdir(os.path.join(newpath, "train"))
         os.mkdir(os.path.join(newpath, "val"))
