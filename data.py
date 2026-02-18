@@ -6,6 +6,25 @@ from functools import partial
 import PIL
 from collections import defaultdict
 
+def train_aug(img, mask=None, seed=None):
+    """Deterministic train augmentations"""
+    # Flip
+    if torch.randint(0, 2, (), generator=seed).item():
+        img = img.flip((-1,))
+        if mask is not None: mask = mask.flip((-1,))
+    # Crop
+    i = torch.randint(0, img.shape[1]-224+1, (), generator=seed).item()
+    j = torch.randint(0, img.shape[2]-224+1, (), generator=seed).item()
+    img = torchvision.transforms.functional.crop(img, i, j, 224, 224)
+    if mask is not None: mask = torchvision.transforms.functional.crop(mask, i, j, 224, 224)
+    # Color jitter
+    brightness = 0.8 + torch.rand((), generator=seed).item()*0.4
+    img *= brightness
+    contrast = 0.8 + torch.rand((), generator=seed).item()*0.4
+    mean = torch.mean(img, (1,2), keepdims=True)
+    img = (img - mean) * contrast + mean
+    return img, mask
+
 def preprocess(original_path="MPIIGaze/MPIIGaze/Data/Normalized", new_path="MPIIGaze_preprocessed/"):
     """Run once."""
     # Split the MPIIGaze dataset into train/val/test sets.
@@ -62,7 +81,13 @@ class MPIIGaze(Dataset):
 
 class ImageNet(Dataset):
     def __init__(self, path:str="/data/bucket/traincombmodels/imnetproc", partition:str="train", n_clients:int=4, 
-                 n_classes:int=1000, originalpath:str="/data/bucket/traincombmodels/imagenet"):
+                 n_classes:int=1000, originalpath:str="/data/bucket/traincombmodels/imagenet", seed=None):
+        # Set random seed
+        if seed is not None: self.seed = seed 
+        else:
+            self.seed = torch.Generator()
+            self.seed.manual_seed(42)
+        # Create split
         if not os.path.exists(path):
             self.repartition(originalpath, path)
         self.partition = partition
@@ -94,15 +119,8 @@ class ImageNet(Dataset):
         self.n_clients = n_clients
         self.n_classes = n_classes
         # Augmentations
-        self.val_augs = torchvision.transforms.Compose([
-            torchvision.transforms.CenterCrop(224),
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
-        self.train_augs = torchvision.transforms.Compose([
-            torchvision.transforms.RandomCrop(224),
-            torchvision.transforms.RandomHorizontalFlip(),
-            torchvision.transforms.ColorJitter(brightness=0.1, contrast=0.1),
+        self.val_crop = torchvision.transforms.CenterCrop(224)
+        self.convert = torchvision.transforms.Compose([
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
@@ -132,8 +150,11 @@ class ImageNet(Dataset):
         i = idx // self.n_clients
         label, img = self.data[c][i]
         # Apply augmentations
-        if self.partition=="train": img = self.train_augs(img)
-        else: img = self.val_augs(img)
+        img = self.convert(img)
+        if self.partition=="train": 
+            img, _ = train_aug(img, seed=self.seed)
+            self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
+        else: img = self.val_crop(img)
         # Change to HWC
         img = torch.permute(img, (1,2,0))
         return label, img
@@ -172,25 +193,6 @@ class OxfordPets(Dataset):
         # Deterministic val augs
         self.val_aug = torchvision.transforms.CenterCrop(224)
 
-    def train_aug(self, img, mask):
-        """Deterministic train augmentations"""
-        # Flip
-        if torch.randint(0, 2, (), generator=self.seed).item():
-            img = img.flip((-1,))
-            mask = mask.flip((-1,))
-        # Crop
-        i = torch.randint(0, img.shape[1]-224+1, (), generator=self.seed).item()
-        j = torch.randint(0, img.shape[2]-224+1, (), generator=self.seed).item()
-        img = torchvision.transforms.functional.crop(img, i, j, 224, 224)
-        mask = torchvision.transforms.functional.crop(mask, i, j, 224, 224)
-        # Color jitter
-        brightness = 0.8 + torch.rand((), generator=self.seed).item()*0.4
-        img *= brightness
-        contrast = 0.8 + torch.rand((), generator=self.seed).item()*0.4
-        mean = torch.mean(img, (1,2), keepdims=True)
-        img = (img - mean) * contrast + mean
-        return img, mask
-
     def __len__(self):
         # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
         return min([len(files) for files in self.files.values()])*self.n_clients
@@ -201,7 +203,7 @@ class OxfordPets(Dataset):
         img, mask = self.files[client][i]
         # Apply augmentations
         if self.partition=="train": 
-            img, mask = self.train_aug(img, mask)
+            img, mask = train_aug(img, mask, seed=self.seed)
             self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
         else:
             img = self.val_aug(img)
@@ -212,9 +214,14 @@ class OxfordPets(Dataset):
         return mask, img
 
 class CelebA(Dataset):
-    def __init__(self, path:str="/data/bucket/traincombmodels/celeba", partition="train", n_clients=4):
+    def __init__(self, path:str="/data/bucket/traincombmodels/celeba", partition="train", n_clients=4, seed=None):
         self.n_clients = n_clients
         self.partition = partition
+        # Set random seed for augmentation
+        if seed is not None: self.seed = seed 
+        else:
+            self.seed = torch.Generator()
+            self.seed.manual_seed(42)
         # Load filenames and race
         with open(os.path.join(path, "identity_CelebA.txt")) as f:
             persons = f.readlines()
@@ -239,16 +246,8 @@ class CelebA(Dataset):
             img = torchvision.transforms.functional.resize(img, 256)
             self.files[client].append((img, label))
         # Augmentations
-        self.val_augs = torchvision.transforms.Compose([
-            torchvision.transforms.CenterCrop(224),
-            torchvision.transforms.ToTensor()
-        ])
-        self.train_augs = torchvision.transforms.Compose([
-            torchvision.transforms.RandomCrop(224),
-            torchvision.transforms.RandomHorizontalFlip(),
-            torchvision.transforms.ColorJitter(brightness=0.1, contrast=0.1),
-            torchvision.transforms.ToTensor()
-        ])
+        self.val_crop = torchvision.transforms.CenterCrop(224),
+        self.convert = torchvision.transforms.ToTensor()
         
     def __len__(self):
         # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
@@ -260,8 +259,11 @@ class CelebA(Dataset):
         # Load
         img, label = self.files[client][i]
         # Augment
-        if self.partition=="train": img = self.train_augs(img)
-        else: img = self.val_augs(img)
+        img = self.convert(img)
+        if self.partition=="train":
+            img = train_aug(img, seed=self.seed)
+            self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
+        else: img = self.val_crop(img)
         # Change to HWC
         img = torch.permute(img, (1,2,0)).float()
         return label, img
