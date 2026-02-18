@@ -1,10 +1,10 @@
 from scipy.io import loadmat
-import os, torch, shutil, torchvision, optax, hashlib
+import os, torch, shutil, torchvision, hashlib, PIL
 from torch.utils.data import Dataset, DataLoader, default_collate
 from jax import numpy as jnp
 from functools import partial
-import PIL
 from collections import defaultdict
+from tqdm.auto import tqdm
 
 def train_aug(img:torch.Tensor, mask:torch.Tensor=None, seed=None):
     """Deterministic train augmentations"""
@@ -45,7 +45,7 @@ class MPIIGaze(Dataset):
     def preprocess(original_path:str, new_path:str):
         # Split the MPIIGaze dataset into train/val/test sets.
         shutil.copytree(original_path, new_path, dirs_exist_ok=True)
-        for person in [p for p in os.listdir(new_path) if p.startswith("p")]:
+        for person in tqdm([p for p in os.listdir(new_path) if p.startswith("p")], leave=False):
             os.makedirs(os.path.join(new_path, "train", person))
             os.makedirs(os.path.join(new_path, "test", person))
             os.makedirs(os.path.join(new_path, "val", person))
@@ -110,7 +110,7 @@ class ImageNet(Dataset):
         # Assign sample paths to each client
         self.data = {c: [] for c in range(n_clients)}
         client = 0
-        for dirname, _, filelist in g:
+        for dirname, _, filelist in tqdm(g, leave=False):
             classname = os.path.basename(dirname)
             # Only n_classes
             if classname in classes.keys():
@@ -131,10 +131,10 @@ class ImageNet(Dataset):
     @staticmethod
     def repartition(originalpath, newpath, train_frac=0.8):
         """Divides the train partition into train/val/test"""
-        os.mkdir(os.path.join(newpath, "train"))
-        os.mkdir(os.path.join(newpath, "val"))
-        os.mkdir(os.path.join(newpath, "test"))
-        for classname in os.listdir(os.path.join(originalpath, "Data", "CLS-LOC", "train")):
+        os.makedirs(os.path.join(newpath, "train"))
+        os.makedirs(os.path.join(newpath, "val"))
+        os.makedirs(os.path.join(newpath, "test"))
+        for classname in tqdm(os.listdir(os.path.join(originalpath, "Data", "CLS-LOC", "train")), leave=False):
             os.mkdir(os.path.join(newpath, "train", classname))
             os.mkdir(os.path.join(newpath, "val", classname))
             os.mkdir(os.path.join(newpath, "test", classname))
@@ -176,7 +176,7 @@ class OxfordPets(Dataset):
         # Store in dict per race
         classes_per_client = {i+1:i%n_clients for i in range(37)}
         self.files = defaultdict(list)
-        for i, line in enumerate(lines):
+        for i, line in enumerate(tqdm(lines, leave=False)):
             # Deterministic train/val/test split which likely retains each breed in each partition
             if ["train", "val", "test"][(j:=(i%20-14)//14+1)+(j*i%2)]!=partition: continue
             filename, classint, *_ = line.strip().split(" ")
@@ -237,7 +237,7 @@ class CelebA(Dataset):
         persons_per_client = {}
         self.files = defaultdict(list)
         c = 0
-        for i, (personline, attributeline) in enumerate(zip(persons, attributes)):
+        for i, (personline, attributeline) in enumerate(tqdm(zip(persons, attributes), leave=False, total=len(attributes))):
             # Deterministic train/val/test split which likely retains each person in each partition
             if ["train", "val", "test"][(j:=(i%20-14)//14+1)+(j*i%2)]!=partition: continue
             filename, person = personline.strip().split()
