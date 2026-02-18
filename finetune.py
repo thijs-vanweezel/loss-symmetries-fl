@@ -68,9 +68,8 @@ opt = nnx.Optimizer(
 )
 
 # Cityscapes data
-ds_train = fetch_data(beta=1., dataset=3, n_clients=n_clients, batch_size=16, skew="label")
-ds_val = fetch_data(beta=1., dataset=3, partition="val", n_clients=n_clients, batch_size=16, skew="label")
-ds_test = fetch_data(beta=1., dataset=3, partition="test", n_clients=1, batch_size=16)
+ds_train = fetch_data(beta=1., dataset=3, n_clients=n_clients, skew="label")
+ds_val = fetch_data(beta=1., dataset=3, partition="val", n_clients=n_clients, skew="label")
 
 # Train
 err_fn = lambda m, y, x: 1-jnp.mean(round(nnx.sigmoid(m(x, train=False)))==y)
@@ -89,6 +88,10 @@ models, rounds = train(
 
 # Save decoder
 save_model(models, model_name)
+
+# Load test data
+del ds_train, ds_val
+ds_test = fetch_data(beta=1., dataset=3, partition="test", n_clients=1)
 
 # Reload & evaluate local
 models = load_model(lambda: Classifier(**asymkwargs), model_name)
