@@ -90,6 +90,12 @@ class ImageNet(Dataset):
         else:
             self.seed = torch.Generator()
             self.seed.manual_seed(42)
+        # Augmentations
+        self.val_crop = torchvision.transforms.CenterCrop(224)
+        self.convert = torchvision.transforms.Compose([
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
         # Create split
         if not os.path.exists(path):
             self.repartition(originalpath, path)
@@ -115,18 +121,12 @@ class ImageNet(Dataset):
                     img = torchvision.transforms.functional.resize(img, 256)
                     self.data[client].insert(
                         i*(class_idx-n_classes//n_clients*client), 
-                        (class_idx, img)
+                        (class_idx, self.convert(img))
                     )
                 client = (client+1) % n_clients
         # Misc attributes
         self.n_clients = n_clients
         self.n_classes = n_classes
-        # Augmentations
-        self.val_crop = torchvision.transforms.CenterCrop(224)
-        self.convert = torchvision.transforms.Compose([
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
 
     @staticmethod
     def repartition(originalpath, newpath, train_frac=0.8):
@@ -154,7 +154,6 @@ class ImageNet(Dataset):
         i = idx // self.n_clients
         label, img = self.data[c][i]
         # Apply augmentations
-        img = self.convert(img)
         if self.partition=="train": 
             img, _ = train_aug(img, seed=self.seed)
             self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
@@ -221,11 +220,14 @@ class CelebA(Dataset):
     def __init__(self, path:str="/data/bucket/traincombmodels/celeba", partition="train", n_clients=4, seed=None):
         self.n_clients = n_clients
         self.partition = partition
-        # Set random seed for augmentation
+        # Set random seed for augmentations
         if seed is not None: self.seed = seed 
         else:
             self.seed = torch.Generator()
             self.seed.manual_seed(42)
+        # Augmentations
+        self.val_crop = torchvision.transforms.CenterCrop(224)
+        self.convert = torchvision.transforms.ToTensor()
         # Load filenames and race
         with open(os.path.join(path, "identity_CelebA.txt")) as f:
             persons = f.readlines()
@@ -248,10 +250,7 @@ class CelebA(Dataset):
             label = torch.tensor([(int(attrib)+1)//2 for attrib in attribs])
             img = PIL.Image.open(os.path.join(path, "images", filename)).convert("RGB")
             img = torchvision.transforms.functional.resize(img, 256)
-            self.files[client].append((img, label))
-        # Augmentations
-        self.val_crop = torchvision.transforms.CenterCrop(224),
-        self.convert = torchvision.transforms.ToTensor()
+            self.files[client].append((self.convert(img), label))
         
     def __len__(self):
         # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
@@ -263,9 +262,8 @@ class CelebA(Dataset):
         # Load
         img, label = self.files[client][i]
         # Augment
-        img = self.convert(img)
         if self.partition=="train":
-            img = train_aug(img, seed=self.seed)
+            img, _ = train_aug(img, seed=self.seed)
             self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
         else: img = self.val_crop(img)
         # Change to HWC
