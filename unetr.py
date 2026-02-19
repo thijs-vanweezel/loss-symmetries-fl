@@ -1,12 +1,13 @@
 # Mostly based on https://docs.jaxstack.ai/en/latest/JAX_examples_image_segmentation.html
+import jax
 from jax import numpy as jnp
 from flax import nnx
-import jax
 from typing import Callable
 from models import AsymConv, AsymLinear, interleave
+from functools import partial
 
-@jax.vmap
-def uninterleave(x:jax.Array, k=2):
+@partial(jax.vmap, in_axes=(0,None))
+def uninterleave(x:jax.Array, k:int):
     return x[::k, ::k]
 
 class AsymConv(AsymConv):
