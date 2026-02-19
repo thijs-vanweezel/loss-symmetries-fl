@@ -1,9 +1,14 @@
+import os, sys
+sys.path.append(os.path.split(os.path.dirname(os.path.abspath(__file__)))[0])
+os.environ["XLA_FLAGS"] = " --xla_gpu_strict_conv_algorithm_picker=false"
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 import jax, optax, argparse
 from jax import numpy as jnp
 from flax import nnx
 from utils import nnx_norm, miou, load_model
 from data import fetch_data
 from models import ResNet
+from unetr import UNETR
 
 parser = argparse.ArgumentParser(
     description="Load model and dataset, and calculate the dominant eigenvalue of the Hessian of the loss using power iteration. Assumes four clients."
@@ -20,8 +25,10 @@ if args.dataset == "celeba":
     dataloader = iter(fetch_data(skew="feature", partition="test", n_clients=n_clients, beta=1., dataset=3))
     _loss_fn = lambda m, y, x: optax.sigmoid_binary_cross_entropy(m(x, train=False), y).mean()
 elif args.dataset == "oxford":
+    asymkwargs["out_channels"] = 20
+    asymkwargs["img_size"] = 224
     modelclass = UNETR
-    dataloader = iter(fetch_data(skew="feature", partition="test", n_clients=n_clients, beta=1., dataset=2))
+    dataloader = iter(fetch_data(skew="feature", partition="test", n_clients=n_clients, beta=1., dataset=2, batch_size=16))
     def _loss_fn(model, y, x):
         logits = model(x, train=False)
         ce = optax.softmax_cross_entropy_with_integer_labels(logits, y, axis=-1).mean()
