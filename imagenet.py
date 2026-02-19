@@ -88,16 +88,3 @@ print(f"Top-5 err test, measured separately: {err_sep_test.mean()}")
 vval_fn = nnx.jit(nnx.vmap(err_fn, in_axes=(0,0,0)))
 err_test = reduce(lambda e, batch: e + vval_fn(models, *batch), ds_test, 0.) / len(ds_test)
 print(f"Top-1 test err, measured separately: {err_test.mean()}")
-
-# Measure angular drift
-updates_flat = jnp.concatenate(jax.tree.map(lambda x: jnp.reshape(x, (n_clients,-1)), jax.tree.leaves(updates)), axis=1)
-update_g = updates_flat.mean(0)
-print("angular drift: ", jnp.degrees(jnp.arccos(optax.losses.cosine_similarity(update_g, updates_flat)).mean()).item())
-
-# Measure functional drift
-func_drift = functional_drift(models, ds_test)
-print("functional drift: ", func_drift.mean().item())
-
-# Measure absolute drift
-print("L1 drift: ", jnp.sum(jnp.abs(update_g - updates_flat), axis=-1).mean().item())
-print("L2 drift: ", jnp.sqrt(jnp.sum((update_g - updates_flat)**2, axis=-1)).mean().item())
