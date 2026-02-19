@@ -22,7 +22,7 @@ if args.asymtype == "wasym":
     asymkwargs["wasym"] = True
     asymkwargs["kappa"] = 1
 elif args.asymtype == "syre":
-    asymkwargs["ssigma"] = 1e-4
+    asymkwargs["sigma"] = 1e-4
     ell = lambda m, mg, y, x: optax.sigmoid_binary_cross_entropy(m(x, train=True), y).mean() \
         + 1e-4*nnx_norm(nnx.state(m, nnx.Param), n_clients=n_clients).mean()
 elif args.asymtype == "normweights":
