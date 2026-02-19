@@ -1,5 +1,7 @@
+import os, torch, shutil, torchvision, hashlib
+from torchvision.transforms import v2
+from torchvision.transforms.v2 import functional
 from scipy.io import loadmat
-import os, torch, shutil, torchvision, hashlib, PIL
 from torch.utils.data import Dataset, DataLoader, default_collate
 from jax import numpy as jnp
 from functools import partial
@@ -16,8 +18,8 @@ def train_aug(img:torch.Tensor, seed, mask:torch.Tensor=None, ):
     # Crop
     i = torch.randint(0, img.shape[1]-224+1, (), generator=seed).item()
     j = torch.randint(0, img.shape[2]-224+1, (), generator=seed).item()
-    img = torchvision.transforms.functional.crop(img, i, j, 224, 224)
-    if mask is not None: mask = torchvision.transforms.functional.crop(mask, i, j, 224, 224)
+    img = functional.crop(img, i, j, 224, 224)
+    if mask is not None: mask = functional.crop(mask, i, j, 224, 224)
     # Color jitter
     brightness = 0.8 + torch.rand((), generator=seed).item()*0.4
     img *= brightness
@@ -92,8 +94,8 @@ class ImageNet(Dataset):
             self.seed = torch.Generator()
             self.seed.manual_seed(42)
         # Augmentations
-        self.val_crop = torchvision.transforms.CenterCrop(224)
-        self.normalize = torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        self.val_crop = v2.CenterCrop(224)
+        self.normalize = v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], inplace=True)
         # Create split
         if not os.path.exists(path):
             self.repartition(originalpath, path)
@@ -154,8 +156,8 @@ class ImageNet(Dataset):
             bytesdata = torch.frombuffer(f.read(), dtype=torch.uint8)
         img = torchvision.io.decode_jpeg(bytesdata, mode="RGB").half() / 255.
         # Apply augmentations
-        img = torchvision.transforms.functional.resize(img, 256)
-        img = self.normalize(img)
+        img = functional.resize(img, 256)
+        self.normalize(img)
         if self.partition=="train": 
             img, _ = train_aug(img, seed=self.seed)
             self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
@@ -187,16 +189,14 @@ class OxfordPets(Dataset):
             client = classes_per_client[classint:=int(classint)]
             # Load in ram (move to __getitem__ if problematic)
             img = torchvision.io.decode_image(os.path.join(path, "images", filename+".jpg"), mode="RGB").float() / 255.
-            img = torchvision.transforms.functional.resize(img, 256)
+            img = functional.resize(img, 256)
             mask = torchvision.io.decode_image(os.path.join(path, "annotations", "trimaps", filename+".png")).long() - 1
-            mask = torchvision.transforms.functional.resize(mask, 256, 
-                                                            interpolation=torchvision.transforms.InterpolationMode.NEAREST, 
-                                                            antialias=False)
+            mask = functional.resize(mask, 256, interpolation=v2.InterpolationMode.NEAREST, antialias=False)
             self.files[client].append((img, mask))
         for client in self.files:
             self.files[client].sort(key=lambda x: hashlib.sha256(str(x).encode()).hexdigest())
         # Deterministic val augs
-        self.val_aug = torchvision.transforms.CenterCrop(224)
+        self.val_aug = v2.CenterCrop(224)
 
     def __len__(self):
         # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
@@ -228,7 +228,7 @@ class CelebA(Dataset):
             self.seed = torch.Generator()
             self.seed.manual_seed(42)
         # Augmentations
-        self.val_crop = torchvision.transforms.CenterCrop(224)
+        self.val_crop = v2.CenterCrop(224)
         # Load filenames and labels
         with open(os.path.join(path, "identity_CelebA.txt")) as f:
             persons = f.readlines()
@@ -252,7 +252,7 @@ class CelebA(Dataset):
             with open(os.path.join(path, "images", filename), "rb") as f:
                       bytesdata = torch.frombuffer(f.read(), dtype=torch.uint8)
             img = torchvision.io.decode_jpeg(bytesdata, mode="RGB").half() / 255.
-            img = torchvision.transforms.functional.resize(img, 256)
+            img = functional.resize(img, 256)
             self.files[client].append((img, label))
         
     def __len__(self):
