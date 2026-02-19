@@ -7,7 +7,7 @@ from collections import defaultdict
 from tqdm.auto import tqdm
 torch.multiprocessing.set_sharing_strategy("file_system")
 
-def train_aug(img:torch.Tensor, mask:torch.Tensor=None, seed=None):
+def train_aug(img:torch.Tensor, seed, mask:torch.Tensor=None, ):
     """Deterministic train augmentations"""
     # Flip
     if torch.randint(0, 2, (), generator=seed).item():
@@ -115,14 +115,9 @@ class ImageNet(Dataset):
                 class_idx = classes[classname]
                 # Insert at interleaved indices so that samples are not ordered by class (note: deterministic)
                 for i, file in enumerate(filelist):
-                    with open(os.path.join(dirname, file), "rb") as f:
-                        bytesdata = torch.frombuffer(f.read(), dtype=torch.uint8)
-                    img = torchvision.io.decode_jpeg(bytesdata, mode="RGB").half() / 255.
-                    img = torchvision.transforms.functional.resize(img, 256)
-                    img = self.normalize(img)
                     self.data[client].insert(
                         i*(class_idx-n_classes//n_clients*client), 
-                        (class_idx, img)
+                        (class_idx, os.path.join(dirname, file))
                     )
                 client = (client+1) % n_clients
         # Misc attributes
@@ -153,8 +148,14 @@ class ImageNet(Dataset):
         # Load datum
         c = idx % self.n_clients
         i = idx // self.n_clients
-        label, img = self.data[c][i]
+        label, img_path = self.data[c][i]
+        # Decode image
+        with open(img_path, "rb") as f:
+            bytesdata = torch.frombuffer(f.read(), dtype=torch.uint8)
+        img = torchvision.io.decode_jpeg(bytesdata, mode="RGB").half() / 255.
         # Apply augmentations
+        img = torchvision.transforms.functional.resize(img, 256)
+        img = self.normalize(img)
         if self.partition=="train": 
             img, _ = train_aug(img, seed=self.seed)
             self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
@@ -207,7 +208,7 @@ class OxfordPets(Dataset):
         img, mask = self.files[client][i]
         # Apply augmentations
         if self.partition=="train": 
-            img, mask = train_aug(img, mask, seed=self.seed)
+            img, mask = train_aug(img, self.seed, mask)
             self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
         else:
             img = self.val_aug(img)
