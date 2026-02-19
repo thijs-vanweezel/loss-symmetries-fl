@@ -24,7 +24,7 @@ if args.asymtype == "wasym":
 elif args.asymtype == "syre":
     asymkwargs["ssigma"] = 1e-4
     ell = lambda m, mg, y, x: optax.sigmoid_binary_cross_entropy(m(x, train=True), y).mean() \
-        + 1e-4*nnx_norm(nnx.state(m, nnx.Param), n_clients=n_clients)
+        + 1e-4*nnx_norm(nnx.state(m, nnx.Param), n_clients=n_clients).mean()
 elif args.asymtype == "normweights":
     asymkwargs["normweights"] = True
 elif args.asymtype == "dimexp":
@@ -68,8 +68,8 @@ opt = nnx.Optimizer(
 )
 
 # Cityscapes data
-ds_train = fetch_data(beta=1., dataset=3, n_clients=n_clients, skew="label")
-ds_val = fetch_data(beta=1., dataset=3, partition="val", n_clients=n_clients, skew="label")
+ds_train = fetch_data(beta=1., dataset=3, n_clients=n_clients, skew="label", batch_size=64)
+ds_val = fetch_data(beta=1., dataset=3, partition="val", n_clients=n_clients, skew="label", batch_size=64)
 
 # Train
 err_fn = lambda m, y, x: 1-jnp.mean(round(nnx.sigmoid(m(x, train=False)))==y)
