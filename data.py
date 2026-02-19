@@ -5,6 +5,7 @@ from jax import numpy as jnp
 from functools import partial
 from collections import defaultdict
 from tqdm.auto import tqdm
+torch.multiprocessing.set_sharing_strategy("file_system")
 
 def train_aug(img:torch.Tensor, mask:torch.Tensor=None, seed=None):
     """Deterministic train augmentations"""
