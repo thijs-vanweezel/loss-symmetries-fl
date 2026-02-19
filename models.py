@@ -292,20 +292,24 @@ class LeNet(nnx.Module):
         # Some params
         super().__init__()
         # Dimension expansion params
-        self.flat_shape = (6*dimexp,12*dimexp)
-        flat_dim = self.flat_shape[0]*self.flat_shape[1]*16 + 3
         self.dimexp = dimexp
         # Layers
         keys = jax.random.split(key, 5)
         self.conv1 = AsymConv(channels_in, 8, (4,4), keys[0], wasym, kappa, sigma, normweights,  padding="VALID")
         self.conv2 = AsymConv(8, 16, (4,4), keys[1], wasym, kappa, sigma, normweights, padding="VALID")
-        self.fc1 = AsymLinear(flat_dim, 128, keys[2], wasym, kappa, sigma, normweights)
+        # Calculate flat shape
+        flat_shape = jax.eval_shape(self.conv1, jnp.empty((1,36*dimexp,60*dimexp,channels_in)))[0].shape
+        flat_shape = jax.eval_shape(partial(nnx.avg_pool, window_shape=(2,2), strides=(2,2)), jnp.empty(flat_shape)).shape
+        flat_shape = jax.eval_shape(self.conv2, jnp.empty(flat_shape))[0].shape
+        self.flat_shape = jax.eval_shape(partial(nnx.avg_pool, window_shape=(2,2), strides=(2,2)), jnp.empty(flat_shape)).shape
+        # Use flat shape as in_features
+        self.fc1 = AsymLinear(reduce(lambda x,y: x*y, self.flat_shape)+3 , 128, keys[2], wasym, kappa, sigma, normweights)
         self.fc2 = AsymLinear(128, 64, keys[3], wasym, kappa, sigma, normweights)
         self.fc3 = AsymLinear(64, dim_out, keys[4], wasym, kappa, sigma, normweights=False)
     
     def __call__(self, x, z, train=None):
         # Apply dimension expansion if desired
-        if self.dimexp>1: x=interleave(x, k=self.dimexp)
+        if self.dimexp>1: x=interleave(x, self.dimexp)
         # Forward pass
         x, norm = self.conv1(x)
         x = nnx.relu(x)
@@ -365,6 +369,4 @@ def fetch_vit(img_size=224, path="/data/bucket/traincombmodels/models/ViT-B_16.n
         params.pop(key)
     params = flax.core.freeze(params)
     # Return linen model
-
     return model, params
-
