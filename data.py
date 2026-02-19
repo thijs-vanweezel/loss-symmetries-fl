@@ -171,10 +171,10 @@ class OxfordPets(Dataset):
         else:
             self.seed = torch.Generator()
             self.seed.manual_seed(42)
-        # Load filenames and race
+        # Load filenames and breed
         with open(os.path.join(path, "annotations", "list.txt")) as f:
             lines = f.readlines()[6:]
-        # Store in dict per race
+        # Store in dict per breed
         classes_per_client = {i+1:i%n_clients for i in range(37)}
         self.files = defaultdict(list)
         for i, line in enumerate(tqdm(lines, leave=False)):
@@ -228,24 +228,24 @@ class CelebA(Dataset):
             self.seed.manual_seed(42)
         # Augmentations
         self.val_crop = torchvision.transforms.CenterCrop(224)
-        # Load filenames and race
+        # Load filenames and labels
         with open(os.path.join(path, "identity_CelebA.txt")) as f:
             persons = f.readlines()
         with open(os.path.join(path, "list_attr_celeba.txt")) as f:
             attributes = f.readlines()[2:]
-        # Store in dict per race
+        # Store in dict per person
         persons_per_client = {}
         self.files = defaultdict(list)
         c = 0
         for i, (personline, attributeline) in enumerate(tqdm(zip(persons, attributes), leave=False, total=len(attributes))):
-            # Deterministic train/val/test split which likely retains each person in each partition
-            if ["train", "val", "test"][(j:=(i%20-14)//14+1)+(j*i%2)]!=partition: continue
             filename, person = personline.strip().split()
             _filename, *attribs = attributeline.strip().split()
             assert filename==_filename, "Filenames in identity and attribute files do not match"
             # Assign to client
             client = persons_per_client.setdefault(int(person), c)
             c = (c+1) % n_clients
+            # Deterministic train/val/test split which likely retains each person in each partition
+            if ["train", "val", "test"][(tr:=(i%20-14)//14+1)+(tr*i%2)]!=partition: continue
             # One-hot encoded label
             label = torch.tensor([(int(attrib)+1)//2 for attrib in attribs])
             with open(os.path.join(path, "images", filename), "rb") as f:
