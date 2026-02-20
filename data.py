@@ -151,10 +151,7 @@ class ImageNet(Dataset):
         c = idx % self.n_clients
         i = idx // self.n_clients
         label, img_path = self.data[c][i]
-        # Decode image
-        with open(img_path, "rb") as f:
-            bytesdata = torch.frombuffer(f.read(), dtype=torch.uint8)
-        img = torchvision.io.decode_jpeg(bytesdata, mode="RGB").half() / 255.
+        img = torchvision.io.decode_image(img_path, mode="RGB").half() / 255.
         # Apply augmentations
         img = functional.resize(img, 256)
         self.normalize(img)
@@ -249,11 +246,7 @@ class CelebA(Dataset):
             if ["train", "val", "test"][(tr:=(i%20-14)//14+1)+(tr*i%2)]!=partition: continue
             # One-hot encoded label
             label = torch.tensor([(int(attrib)+1)//2 for attrib in attribs])
-            with open(os.path.join(path, "images", filename), "rb") as f:
-                      bytesdata = torch.frombuffer(f.read(), dtype=torch.uint8)
-            img = torchvision.io.decode_jpeg(bytesdata, mode="RGB").half() / 255.
-            img = functional.resize(img, 256)
-            self.files[client].append((img, label))
+            self.files[client].append((os.path.join(path, "images", filename), label))
         
     def __len__(self):
         # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
@@ -263,8 +256,10 @@ class CelebA(Dataset):
         client = idx % len(self.files)
         i = idx // len(self.files)
         # Load
-        img, label = self.files[client][i]
+        impath, label = self.files[client][i]
+        img = torchvision.io.decode_image(impath, mode="RGB").half() / 255.
         # Augment
+        img = functional.resize(img, 256)
         if self.partition=="train":
             img, _ = train_aug(img, seed=self.seed)
             self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
@@ -353,12 +348,4 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
         shuffle=False,
         drop_last=True,
         **kwargs
-
     )
-
-
-
-
-
-
-
