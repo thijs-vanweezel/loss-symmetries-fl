@@ -53,11 +53,9 @@ if __name__ == "__main__":
 
     # Load data
     ds_train = fetch_data(beta=1., dataset=2, n_clients=n_clients, batch_size=64,
-                        num_workers=4, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
+                        num_workers=6, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
     ds_val = fetch_data(beta=1., dataset=2, partition="val", n_clients=n_clients, batch_size=64, 
-                        num_workers=2, prefetch_factor=1, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
-    ds_test = fetch_data(beta=1., dataset=2, partition="test", n_clients=n_clients, batch_size=64, 
-                        num_workers=2, prefetch_factor=1, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
+                        num_workers=4, prefetch_factor=1, multiprocessing_context=mp.get_context("spawn"))
 
     # Train (fixed number of epochs since test data is not available)
     models, rounds = train(
@@ -79,6 +77,11 @@ if __name__ == "__main__":
 
     # Aggregate
     model_g = aggregate(model_init, get_updates(model_init, models))
+
+    # Load test data
+    del ds_train, ds_val
+    ds_test = fetch_data(beta=1., dataset=2, partition="test", n_clients=n_clients, batch_size=64, 
+                         num_workers=4, prefetch_factor=1, multiprocessing_context=mp.get_context("spawn"))
 
     # Evaluate aggregated model
     model_g.eval()
