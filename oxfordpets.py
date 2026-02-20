@@ -32,7 +32,7 @@ if __name__ == "__main__":
     model_name = f"/data/bucket/traincombmodels/models/oxford_{args.asymtype or ('central' if n_clients==1 else 'base')}.pkl"
 
     # Initialize model
-    model_init = UNETR(20, img_size=224, **asymkwargs)
+    model_init = UNETR(3, **asymkwargs)
     lr = optax.warmup_exponential_decay_schedule(1e-4, .5, 500, 250, .9, end_value=1e-5)
     opt = nnx.Optimizer(
         model_init,
