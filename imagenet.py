@@ -7,7 +7,8 @@ from flax import nnx
 from models import ResNet
 from data import fetch_data
 from functools import reduce
-from utils import return_ce, top_5_err, save_model, load_model, err_fn, nnx_norm
+from utils import return_ce, top_5_err, err_fn, nnx_norm
+from orbax import checkpoint
 
 if __name__ == "__main__":
     # Allow user-specified arguments
@@ -32,7 +33,7 @@ if __name__ == "__main__":
     elif args.asymtype == "dimexp":
         asymkwargs["dimexp"] = 1
     # Model name based on asymmetry type
-    model_name = f"/data/bucket/traincombmodels/models/imagenet{args.n_classes}_{args.asymtype or ('central' if n_clients==1 else 'base')}.pkl"
+    model_name = f"/data/bucket/traincombmodels/models/imagenet{args.n_classes}_{args.asymtype or ('central' if n_clients==1 else 'base')}.obx"
     # Model complexity based on data complexity
     if (n_classes:=args.n_classes)>100:
         layers = [3,4,6,3]
@@ -56,16 +57,21 @@ if __name__ == "__main__":
 
     # Train
     models, _ = train(model_init, opt, ds_train, return_ce(0.), ds_val, 
-                    local_epochs="early", rounds="early" if n_clients>1 else 1, max_patience=3, val_fn=top_5_err, n_clients=n_clients);
+                    local_epochs="early", rounds="early" if n_clients>1 else 1, max_patience=3, val_fn=top_5_err, n_clients=n_clients)
 
     # Save model
-    save_model(models, model_name)
+    _, state = nnx.split(models)
+    cptr = checkpoint.StandardCheckpointer()
+    cptr.save(os.path.abspath(model_name), state)
+    cptr.close()
 
-    # Load
-    models = load_model(
-        lambda: ResNet(layers=layers, dim_out=n_classes, **asymkwargs), 
-        model_name
-    )
+    # Load (unnecessary if still in session)
+    abstract_model = nnx.eval_shape(lambda: ResNet(dim_out=n_classes, layers=layers, **asymkwargs))
+    struct, stateref = nnx.split(abstract_model)
+    cptr = checkpoint.StandardCheckpointer()
+    state = cptr.restore(os.path.abspath(model_name), stateref)
+    model = nnx.merge(struct, state)
+    cptr.close()
 
     # Aggregate
     updates = get_updates(model_init, models)
