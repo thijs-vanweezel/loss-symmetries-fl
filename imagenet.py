@@ -44,7 +44,7 @@ if __name__ == "__main__":
     ds_train = fetch_data(beta=1., skew="label", dataset=1, n_clients=n_clients, n_classes=n_classes,
                           num_workers=10, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
     ds_val = fetch_data(partition="val", beta=1., skew="label", dataset=1, n_clients=n_clients, n_classes=n_classes,
-                        num_workers=2, prefetch_factor=1, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
+                        num_workers=10, prefetch_factor=1, multiprocessing_context=mp.get_context("spawn"))
 
     # Initialize model and optimizer
     model_init = ResNet(jax.random.key(42), dim_out=n_classes, layers=layers, **asymkwargs)
@@ -57,7 +57,8 @@ if __name__ == "__main__":
 
     # Train
     models, _ = train(model_init, opt, ds_train, return_ce(0.), ds_val, 
-                    local_epochs="early", rounds="early" if n_clients>1 else 1, max_patience=3, val_fn=top_5_err, n_clients=n_clients)
+                      local_epochs="early", rounds="early" if n_clients>1 else 1, 
+                      max_patience=3, val_fn=top_5_err, n_clients=n_clients)
 
     # Save model
     _, state = nnx.split(models)
@@ -71,7 +72,7 @@ if __name__ == "__main__":
     # Load test data
     del ds_train, ds_val
     ds_test = fetch_data(partition="test", beta=1., skew="label", dataset=1, n_clients=n_clients, n_classes=n_classes,
-                         num_workers=2, multiprocessing_context=mp.get_context("spawn"))
+                         num_workers=10, multiprocessing_context=mp.get_context("spawn"))
 
     # Evaluate global performance
     vval_fn = nnx.jit(nnx.vmap(top_5_err, in_axes=(None,0,0)))
