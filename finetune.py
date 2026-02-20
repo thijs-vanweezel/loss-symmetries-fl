@@ -70,7 +70,7 @@ if __name__ == "__main__":
 
     # CelebA data
     ds_train = fetch_data(beta=1., dataset=3, n_clients=n_clients, skew="label", batch_size=64,
-                          num_workers=6, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
+                          num_workers=6, multiprocessing_context=mp.get_context("spawn"))
     ds_val = fetch_data(beta=1., dataset=3, partition="val", n_clients=n_clients, skew="label", batch_size=64,
                         num_workers=2, multiprocessing_context=mp.get_context("spawn"))
 

@@ -42,7 +42,7 @@ if __name__ == "__main__":
 
     # Get data
     ds_train = fetch_data(beta=1., skew="label", dataset=1, n_clients=n_clients, n_classes=n_classes,
-                          num_workers=10, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
+                          num_workers=10, multiprocessing_context=mp.get_context("spawn"))
     ds_val = fetch_data(partition="val", beta=1., skew="label", dataset=1, n_clients=n_clients, n_classes=n_classes,
                         num_workers=10, prefetch_factor=1, multiprocessing_context=mp.get_context("spawn"))
 
