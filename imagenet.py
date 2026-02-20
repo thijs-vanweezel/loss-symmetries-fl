@@ -24,7 +24,7 @@ if __name__ == "__main__":
         asymkwargs["wasym"] = True
         asymkwargs["kappa"] = 1
     elif args.asymtype == "syre":
-        asymkwargs["ssigma"] = 1e-4
+        asymkwargs["sigma"] = 1e-4
         ell = lambda m, mg, y, x: optax.softmax_cross_entropy_with_integer_labels(m(x, train=True), y).mean() \
             + 1e-4*nnx_norm(nnx.state(m, nnx.Param), n_clients=n_clients)
     elif args.asymtype == "normweights":
