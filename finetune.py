@@ -30,7 +30,7 @@ if __name__ == "__main__":
         asymkwargs["normweights"] = True
     elif args.asymtype == "dimexp":
         asymkwargs["dimexp"] = 1
-    model_name = f"/data/bucket/traincombmodels/models/celeba_{args.asymtype or ('central' if n_clients==1 else 'base')}.pkl"
+    model_name = f"/data/bucket/traincombmodels/models/celeba_{args.asymtype or ('central' if n_clients==1 else 'base')}"
 
     # Load Google's ViT as backbone and attach head, mixing flax.linen and flax.nnx
     class Classifier(nnx.Module):
@@ -68,11 +68,11 @@ if __name__ == "__main__":
         wrt=nnx.Param
     )
 
-    # Cityscapes data
+    # CelebA data
     ds_train = fetch_data(beta=1., dataset=3, n_clients=n_clients, skew="label", batch_size=64,
                           num_workers=6, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
     ds_val = fetch_data(beta=1., dataset=3, partition="val", n_clients=n_clients, skew="label", batch_size=64,
-                        num_workers=2, prefetch_factor=1, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
+                        num_workers=2, multiprocessing_context=mp.get_context("spawn"))
 
     # Train
     err_fn = lambda m, y, x: 1-jnp.mean(round(nnx.sigmoid(m(x, train=False)))==y)
