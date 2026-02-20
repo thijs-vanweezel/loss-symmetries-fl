@@ -33,7 +33,7 @@ if __name__ == "__main__":
     elif args.asymtype == "dimexp":
         asymkwargs["dimexp"] = 1
     # Model name based on asymmetry type
-    model_name = f"/data/bucket/traincombmodels/models/imagenet{args.n_classes}_{args.asymtype or ('central' if n_clients==1 else 'base')}.obx"
+    model_name = f"/data/bucket/traincombmodels/models/imagenet{args.n_classes}_{args.asymtype or ('central' if n_clients==1 else 'base')}"
     # Model complexity based on data complexity
     if (n_classes:=args.n_classes)>100:
         layers = [3,4,6,3]
@@ -61,17 +61,8 @@ if __name__ == "__main__":
 
     # Save model
     _, state = nnx.split(models)
-    cptr = checkpoint.StandardCheckpointer()
-    cptr.save(os.path.abspath(model_name), state)
-    cptr.close()
-
-    # Load (unnecessary if still in session)
-    abstract_model = nnx.eval_shape(lambda: ResNet(dim_out=n_classes, layers=layers, **asymkwargs))
-    struct, stateref = nnx.split(abstract_model)
-    cptr = checkpoint.StandardCheckpointer()
-    state = cptr.restore(os.path.abspath(model_name), stateref)
-    model = nnx.merge(struct, state)
-    cptr.close()
+    with checkpoint.StandardCheckpointer() as cptr:
+        cptr.save(os.path.abspath(model_name), state, force=True)
 
     # Aggregate
     updates = get_updates(model_init, models)
