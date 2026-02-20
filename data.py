@@ -9,7 +9,7 @@ from collections import defaultdict
 from tqdm.auto import tqdm
 torch.multiprocessing.set_sharing_strategy("file_system")
 
-def train_aug(img:torch.Tensor, seed, mask:torch.Tensor=None, ):
+def train_aug(img:torch.Tensor, seed, mask:torch.Tensor=None):
     """Deterministic train augmentations"""
     # Flip
     if torch.randint(0, 2, (), generator=seed).item():
@@ -151,7 +151,9 @@ class ImageNet(Dataset):
         c = idx % self.n_clients
         i = idx // self.n_clients
         label, img_path = self.data[c][i]
-        img = torchvision.io.decode_image(img_path, mode="RGB").half() / 255.
+        with open(img_path, "rb") as f:
+            bytesdata = torch.frombuffer(f.read(), dtype=torch.uint8)
+        img = torchvision.io.decode_image(bytesdata, mode="RGB").half() / 255.
         # Apply augmentations
         img = functional.resize(img, 256)
         self.normalize(img)
@@ -257,7 +259,9 @@ class CelebA(Dataset):
         i = idx // len(self.files)
         # Load
         impath, label = self.files[client][i]
-        img = torchvision.io.decode_image(impath, mode="RGB").half() / 255.
+        with open(impath, "rb") as f:
+            bytesdata = torch.frombuffer(f.read(), dtype=torch.uint8)
+        img = torchvision.io.decode_image(bytesdata, mode="RGB").half() / 255.
         # Augment
         img = functional.resize(img, 256)
         if self.partition=="train":
