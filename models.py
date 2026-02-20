@@ -298,12 +298,14 @@ class LeNet(nnx.Module):
         self.conv1 = AsymConv(channels_in, 8, (4,4), keys[0], wasym, kappa, sigma, normweights,  padding="VALID")
         self.conv2 = AsymConv(8, 16, (4,4), keys[1], wasym, kappa, sigma, normweights, padding="VALID")
         # Calculate flat shape
-        flat_shape = jax.eval_shape(self.conv1, jnp.empty((1,36*dimexp,60*dimexp,channels_in)))[0].shape
-        flat_shape = jax.eval_shape(partial(nnx.avg_pool, window_shape=(2,2), strides=(2,2)), jnp.empty(flat_shape)).shape
-        flat_shape = jax.eval_shape(self.conv2, jnp.empty(flat_shape))[0].shape
-        self.flat_shape = jax.eval_shape(partial(nnx.avg_pool, window_shape=(2,2), strides=(2,2)), jnp.empty(flat_shape)).shape
+        validoutshape = lambda in_size, kernel_size=4, stride=1: (in_size - kernel_size) // stride + 1
+        self.hidden_shape = (
+            validoutshape(validoutshape(validoutshape(validoutshape(36*dimexp), 2, 2)), 2, 2),
+            validoutshape(validoutshape(validoutshape(validoutshape(60*dimexp), 2, 2)), 2, 2),
+        )
         # Use flat shape as in_features
-        self.fc1 = AsymLinear(reduce(lambda x,y: x*y, self.flat_shape)+3 , 128, keys[2], wasym, kappa, sigma, normweights)
+        self.fc1 = AsymLinear(self.hidden_shape[0]*self.hidden_shape[1]*16+3, 
+                              128, keys[2], wasym, kappa, sigma, normweights)
         self.fc2 = AsymLinear(128, 64, keys[3], wasym, kappa, sigma, normweights)
         self.fc3 = AsymLinear(64, dim_out, keys[4], wasym, kappa, sigma, normweights=False)
     
@@ -319,7 +321,7 @@ class LeNet(nnx.Module):
         x = nnx.avg_pool(x, window_shape=(2,2), strides=(2,2))
         x = jnp.reshape(x, (x.shape[0], -1))
         x = jnp.concatenate([x, z], axis=-1)
-        if norm is not None: norm = jnp.concat([jnp.tile(norm, (*self.flat_shape,1)).flatten(), jnp.ones(3)])
+        if norm is not None: norm = jnp.concat([jnp.tile(norm, (*self.hidden_shape,1)).flatten(), jnp.ones(3)])
         x, norm = self.fc1(x, norm)
         x = nnx.relu(x)
         x, norm = self.fc2(x, norm)
@@ -369,4 +371,5 @@ def fetch_vit(img_size=224, path="/data/bucket/traincombmodels/models/ViT-B_16.n
         params.pop(key)
     params = flax.core.freeze(params)
     # Return linen model
+
     return model, params
