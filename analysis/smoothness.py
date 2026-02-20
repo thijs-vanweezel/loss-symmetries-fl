@@ -3,9 +3,10 @@ sys.path.append(os.path.split(os.path.dirname(os.path.abspath(__file__)))[0])
 os.environ["XLA_FLAGS"] = " --xla_gpu_strict_conv_algorithm_picker=false"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 import jax, optax, argparse
+from orbax import checkpoint
 from jax import numpy as jnp
 from flax import nnx
-from utils import nnx_norm, miou, load_model
+from utils import nnx_norm, miou
 from data import fetch_data
 from models import ResNet
 from unetr import UNETR
@@ -53,8 +54,12 @@ elif args.asymtype == "dimexp":
     kwargs["dimexp"] = 1
 
 # Load model
-model_name = f"../models/{args.dataset}_{args.asymtype or 'base'}.pkl"
-model = load_model(lambda: modelclass(**kwargs), model_name)
+model_name = f"/data/bucket/traincombmodels/models/{args.dataset}_{args.asymtype or 'base'}"
+abstract_model = nnx.eval_shape(lambda: modelclass(**kwargs))
+struct, stateref = nnx.split(abstract_model)
+with checkpoint.StandardCheckpointer() as cptr:
+    state = cptr.restore(os.path.abspath(model_name), stateref)
+model = nnx.merge(struct, state)
 key = jax.random.key(42)
 
 # Calculate the dominant eigenvalue (lambda_max) of an nnx model using the power iteration method
@@ -99,4 +104,4 @@ def lambda_max(model, dataloader, key, max_iter=100):
 
 # Run
 hessian = lambda_max(model, dataloader, key)
-print("Dominant eigenvalue of Hessian:", hessian)
+print(f"Dominant eigenvalue of Hessian matrix for {args.dataset} with asymmetry {args.asymtype}: ", hessian)
