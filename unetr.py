@@ -456,9 +456,9 @@ class UNETR(nnx.Module):
     """
     def __init__(
         self,
-        out_channels: int,
+        out_channels: int = 3,
         in_channels: int = 3,
-        img_size: int = 256,
+        img_size: int = 224,
         feature_size: int = 16,
         hidden_size: int = 768,
         mlp_dim: int = 3072,
