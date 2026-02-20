@@ -6,7 +6,8 @@ import jax, optax, os, multiprocessing as mp, argparse
 from fedflax import train, get_updates, aggregate
 from unetr import UNETR
 from data import fetch_data
-from utils import miou, save_model, nnx_norm
+from orbax import checkpoint
+from utils import miou, nnx_norm
 from jax import numpy as jnp
 from flax import nnx
 from functools import reduce
@@ -71,8 +72,10 @@ if __name__ == "__main__":
         val_fn=lambda model, y, x: 1-miou(jax.nn.one_hot(jnp.argmax(model(x, train=False), axis=-1), y.shape[-1]), y),
         ds_val=ds_val
     )
-    # Save client models
-    save_model(models, model_name)
+    # Save model
+    _, state = nnx.split(models)
+    with checkpoint.StandardCheckpointer() as cptr:
+        cptr.save(os.path.abspath(model_name), state, force=True)
 
     # Aggregate
     model_g = aggregate(model_init, get_updates(model_init, models))

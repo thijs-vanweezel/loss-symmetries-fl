@@ -5,7 +5,8 @@ import jax, optax, multiprocessing as mp, argparse
 from fedflax import train
 from models import fetch_vit, AsymLinear, interleave
 from data import fetch_data
-from utils import load_model, save_model, nnx_norm
+from orbax import checkpoint
+from utils import load_model, nnx_norm
 from flax import nnx
 from functools import reduce
 from jax import numpy as jnp
@@ -88,8 +89,10 @@ if __name__ == "__main__":
         val_fn=err_fn
     )
 
-    # Save decoder
-    save_model(models, model_name)
+    # Save model
+    _, state = nnx.split(models)
+    with checkpoint.StandardCheckpointer() as cptr:
+        cptr.save(os.path.abspath(model_name), state, force=True)
 
     # Load test data
     del ds_train, ds_val
