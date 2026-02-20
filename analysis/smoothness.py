@@ -18,15 +18,13 @@ parser.add_argument("--asymtype", type=str, default="", choices=["", "wasym", "s
 args = parser.parse_args()
 
 # Setup model, dataset, and loss
-asymkwargs = {"key":jax.random.key(0)}
+kwargs = {"key":jax.random.key(0)}
 n_clients = 4
 if args.dataset == "celeba":
     modelclass = ...
     dataloader = iter(fetch_data(skew="feature", partition="test", n_clients=n_clients, beta=1., dataset=3))
     _loss_fn = lambda m, y, x: optax.sigmoid_binary_cross_entropy(m(x, train=False), y).mean()
 elif args.dataset == "oxford":
-    asymkwargs["out_channels"] = 20
-    asymkwargs["img_size"] = 224
     modelclass = UNETR
     dataloader = iter(fetch_data(skew="feature", partition="test", n_clients=n_clients, beta=1., dataset=2, batch_size=16))
     def _loss_fn(model, y, x):
@@ -35,6 +33,7 @@ elif args.dataset == "oxford":
         miou_err = 1. - miou(jax.nn.softmax(logits, axis=-1), y)
         return ce + miou_err
 elif args.dataset == "imagenet":
+    kwargs["layers"] = [3,4,6,3]
     modelclass = ResNet
     dataloader = iter(fetch_data(skew="feature", partition="test", n_clients=n_clients, beta=1., dataset=1))
     _loss_fn = lambda m, y, x: optax.softmax_cross_entropy_with_integer_labels(m(x, train=False), y).mean()
@@ -42,20 +41,20 @@ elif args.dataset == "imagenet":
 # Asymmetry parameters
 loss_fn = _loss_fn
 if args.asymtype == "wasym":
-    asymkwargs["wasym"] = True
-    asymkwargs["kappa"] = 1
+    kwargs["wasym"] = True
+    kwargs["kappa"] = 1
 elif args.asymtype == "syre":
-    asymkwargs["sigma"] = 1e-4
+    kwargs["sigma"] = 1e-4
     loss_fn = lambda m, y, x: _loss_fn(m, y, x) \
         + 1e-4*nnx_norm(nnx.state(m, nnx.Param), n_clients=n_clients).mean()
 elif args.asymtype == "normweights":
-    asymkwargs["normweights"] = True
+    kwargs["normweights"] = True
 elif args.asymtype == "dimexp":
-    asymkwargs["dimexp"] = 1
+    kwargs["dimexp"] = 1
 
 # Load model
 model_name = f"../models/{args.dataset}_{args.asymtype or 'base'}.pkl"
-model = load_model(lambda: modelclass(**asymkwargs), model_name)
+model = load_model(lambda: modelclass(**kwargs), model_name)
 key = jax.random.key(42)
 
 # Calculate the dominant eigenvalue (lambda_max) of an nnx model using the power iteration method
