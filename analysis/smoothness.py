@@ -27,11 +27,11 @@ kwargs = {"key":jax.random.key(0)}
 n_clients = 4
 if args.dataset == "celeba":
     modelclass = Classifier
-    dataloader = fetch_data(skew="feature", partition="test", n_clients=n_clients, beta=1., dataset=3, batch_size=64)
+    dataloader = fetch_data(skew="feature", partition="test", n_clients=1, beta=1., dataset=3, batch_size=64)
     _loss_fn = lambda m, y, x: optax.sigmoid_binary_cross_entropy(m(x, train=False), y).mean()
 elif args.dataset == "oxford":
     modelclass = UNETR
-    dataloader = fetch_data(skew="feature", partition="test", n_clients=n_clients, beta=1., dataset=2, batch_size=64)
+    dataloader = fetch_data(skew="feature", partition="test", n_clients=1, beta=1., dataset=2, batch_size=64)
     def _loss_fn(model, y, x):
         logits = model(x, train=False)
         ce = optax.softmax_cross_entropy_with_integer_labels(logits, y, axis=-1).mean()
@@ -40,7 +40,7 @@ elif args.dataset == "oxford":
 elif args.dataset == "imagenet":
     kwargs["layers"] = [3,4,6,3]
     modelclass = ResNet
-    dataloader = fetch_data(skew="label", partition="test", n_clients=n_clients, beta=1., dataset=1, batch_size=64)
+    dataloader = fetch_data(skew="label", partition="test", n_clients=1, beta=1., dataset=1, batch_size=64)
     _loss_fn = lambda m, y, x: optax.softmax_cross_entropy_with_integer_labels(m(x, train=False), y).mean()
 
 # Asymmetry parameters
@@ -85,7 +85,7 @@ def lambda_max(model, dataloader, key, max_iter=100):
     def true_fun(val):
         # Power iteration step
         hv_prev, *_, y, x, i = val
-        grad_fn = partial(_grad_fn, x=x, y=y)
+        grad_fn = partial(_grad_fn, x=x.squeeze(0), y=y.squeeze(0))
         norm = nnx_norm(hv_prev)
         v = jax.tree.map(lambda hv_: hv_ / norm, hv_prev)
         hv = jax.jvp(
