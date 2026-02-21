@@ -13,6 +13,7 @@ from unetr import UNETR
 from finetune import Classifier
 from tqdm.auto import tqdm
 from fedflax import cast
+from functools import partial
 
 parser = argparse.ArgumentParser(
     description="Load model and dataset, and calculate the dominant eigenvalue of the Hessian of the loss using power iteration. Assumes four clients."
@@ -62,7 +63,7 @@ abstract_model = nnx.eval_shape(lambda: cast(modelclass(**kwargs), n_clients))
 struct, stateref = nnx.split(abstract_model)
 with checkpoint.StandardCheckpointer() as cptr:
     state = cptr.restore(os.path.abspath(model_name), stateref)
-model = nnx.merge(struct, state)
+models = nnx.merge(struct, state)
 
 # Calculate the dominant eigenvalue (lambda_max) of an nnx model using the power iteration method
 # Note that each iteration only considers one batch
@@ -73,21 +74,22 @@ def lambda_max(model, dataloader, key, max_iter=100):
     reconstruct = lambda th: nnx.merge(struct, th, rest)
 
     # Gradient of loss on this data
-    grad_fn = nnx.grad(lambda th, x, y: loss_fn(reconstruct(th), y, x), argnums=0)
+    _grad_fn = nnx.grad(lambda th, x, y: loss_fn(reconstruct(th), y, x).astype(jnp.bfloat16), argnums=0)
 
     # Random normalized vector
-    def random_like(arr): nonlocal key; _, key = jax.random.split(key); return jax.random.normal(key, arr.shape)
+    def random_like(arr): nonlocal key; _, key = jax.random.split(key); return jax.random.normal(key, arr.shape, arr.dtype)
     rand = jax.tree.map(lambda p: random_like(p), theta)
 
     # Perform iteration avoiding python bools
     def true_fun(val):
         # Power iteration step
         hv_prev, *_, y, x, i = val
+        grad_fn = partial(_grad_fn, x=x, y=y)
         norm = nnx_norm(hv_prev)
         v = jax.tree.map(lambda hv_: hv_ / norm, hv_prev)
         hv = jax.jvp(
             grad_fn,
-            (theta,y,x),
+            (theta,),
             (v,)
         )[1]
         return hv, hv_prev, v, *next(dataloader), i+1
@@ -106,5 +108,5 @@ def lambda_max(model, dataloader, key, max_iter=100):
 
 # Run
 key = jax.random.key(42)
-hessian = lambda_max(model, iter(tqdm(dataloader)), key)
+hessian = lambda_max(models, iter(tqdm(dataloader)), key)
 print(f"Dominant eigenvalue of Hessian matrix for {args.dataset} with asymmetry {args.asymtype}: ", hessian)
