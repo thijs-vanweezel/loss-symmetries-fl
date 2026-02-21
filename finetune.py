@@ -99,8 +99,7 @@ if __name__ == "__main__":
     ds_test = fetch_data(beta=1., dataset=3, partition="test", n_clients=n_clients, skew="label",
                          num_workers=4, multiprocessing_context=mp.get_context("spawn"))
 
-    # Reload & evaluate local
-    models = load_model(lambda: Classifier(**asymkwargs), model_name)
+    # Evaluate local
     vtest_fn = nnx.jit(nnx.vmap(err_fn, in_axes=(0,0,0)))
     error = reduce(lambda acc, batch: acc + vtest_fn(models, *batch), ds_test, 0.) / len(ds_test)
     print(f"Local test error (local model): {error.mean().item()*100:.2f}%")
