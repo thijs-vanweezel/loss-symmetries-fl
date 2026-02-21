@@ -10,6 +10,8 @@ from utils import nnx_norm, miou
 from data import fetch_data
 from models import ResNet
 from unetr import UNETR
+from finetune import Classifier
+from tqdm.auto import tqdm
 
 parser = argparse.ArgumentParser(
     description="Load model and dataset, and calculate the dominant eigenvalue of the Hessian of the loss using power iteration. Assumes four clients."
@@ -22,12 +24,12 @@ args = parser.parse_args()
 kwargs = {"key":jax.random.key(0)}
 n_clients = 4
 if args.dataset == "celeba":
-    modelclass = ...
-    dataloader = iter(fetch_data(skew="feature", partition="test", n_clients=n_clients, beta=1., dataset=3))
+    modelclass = Classifier
+    dataloader = iter(fetch_data(skew="feature", partition="test", n_clients=n_clients, beta=1., dataset=3, batch_size=64))
     _loss_fn = lambda m, y, x: optax.sigmoid_binary_cross_entropy(m(x, train=False), y).mean()
 elif args.dataset == "oxford":
     modelclass = UNETR
-    dataloader = iter(fetch_data(skew="feature", partition="test", n_clients=n_clients, beta=1., dataset=2, batch_size=16))
+    dataloader = iter(fetch_data(skew="feature", partition="test", n_clients=n_clients, beta=1., dataset=2, batch_size=64))
     def _loss_fn(model, y, x):
         logits = model(x, train=False)
         ce = optax.softmax_cross_entropy_with_integer_labels(logits, y, axis=-1).mean()
@@ -36,7 +38,7 @@ elif args.dataset == "oxford":
 elif args.dataset == "imagenet":
     kwargs["layers"] = [3,4,6,3]
     modelclass = ResNet
-    dataloader = iter(fetch_data(skew="feature", partition="test", n_clients=n_clients, beta=1., dataset=1))
+    dataloader = iter(fetch_data(skew="feature", partition="test", n_clients=n_clients, beta=1., dataset=1, batch_size=64))
     _loss_fn = lambda m, y, x: optax.softmax_cross_entropy_with_integer_labels(m(x, train=False), y).mean()
 
 # Asymmetry parameters
@@ -60,7 +62,6 @@ struct, stateref = nnx.split(abstract_model)
 with checkpoint.StandardCheckpointer() as cptr:
     state = cptr.restore(os.path.abspath(model_name), stateref)
 model = nnx.merge(struct, state)
-key = jax.random.key(42)
 
 # Calculate the dominant eigenvalue (lambda_max) of an nnx model using the power iteration method
 # Note that each iteration only considers one batch
@@ -103,5 +104,6 @@ def lambda_max(model, dataloader, key, max_iter=100):
         )
 
 # Run
-hessian = lambda_max(model, dataloader, key)
+key = jax.random.key(42)
+hessian = lambda_max(model, tqdm(dataloader), key)
 print(f"Dominant eigenvalue of Hessian matrix for {args.dataset} with asymmetry {args.asymtype}: ", hessian)
