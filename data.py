@@ -186,12 +186,10 @@ class OxfordPets(Dataset):
             # Skip two corrupted files
             if filename in ["beagle_116", "chihuahua_121"]: continue
             client = classes_per_client[classint:=int(classint)]
-            # Load in ram (move to __getitem__ if problematic)
-            img = torchvision.io.decode_image(os.path.join(path, "images", filename+".jpg"), mode="RGB").float() / 255.
-            img = functional.resize(img, 256)
-            mask = torchvision.io.decode_image(os.path.join(path, "annotations", "trimaps", filename+".png")).long() - 1
-            mask = functional.resize(mask, 256, interpolation=v2.InterpolationMode.NEAREST, antialias=False)
-            self.files[client].append((img, mask))
+            # Save paths
+            self.files[client].append((
+                os.path.join(path, "images", filename+".jpg"), 
+                os.path.join(path, "annotations", "trimaps", filename+".png")))
         for client in self.files:
             self.files[client].sort(key=lambda x: hashlib.sha256(str(x).encode()).hexdigest())
         # Deterministic val augs
@@ -204,8 +202,13 @@ class OxfordPets(Dataset):
     def __getitem__(self, idx: int):
         client = idx % len(self.files)
         i = idx // len(self.files)
-        img, mask = self.files[client][i]
+        impath, maskpath = self.files[client][i]
+        # Load
+        img = torchvision.io.decode_image(impath, mode="RGB").float() / 255.
+        mask = torchvision.io.decode_image(maskpath).long() - 1
         # Apply augmentations
+        img = functional.resize(img, 256)
+        mask = functional.resize(mask, 256, interpolation=v2.InterpolationMode.NEAREST, antialias=False)
         if self.partition=="train": 
             img, mask = train_aug(img, self.seed, mask)
             self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
