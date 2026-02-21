@@ -57,10 +57,10 @@ if __name__ == "__main__":
     model_name = f"/data/bucket/traincombmodels/models/celeba_{args.asymtype or ('central' if n_clients==1 else 'base')}"
 
     # Model and optimizer
-    model = Classifier(**asymkwargs)
+    model_init = Classifier(**asymkwargs)
     lr = optax.warmup_exponential_decay_schedule(1e-4, .1, 4000, 1000, .9, end_value=1e-5)
     opt = nnx.Optimizer(
-        model,
+        model_init,
         optax.chain(
             optax.masked(optax.adam(1e-5), lambda ptree: jax.tree.map_with_path(lambda path, _p: any("bbparams" in str(part) for part in path), ptree)),
             optax.masked(optax.adam(lr), lambda ptree: jax.tree.map_with_path(lambda path, _p: not any("bbparams" in str(part) for part in path), ptree))
@@ -77,7 +77,7 @@ if __name__ == "__main__":
     # Train
     err_fn = lambda m, y, x: 1-jnp.mean(round(nnx.sigmoid(m(x, train=False)))==y)
     models, rounds = train(
-        model,
+        model_init,
         opt,
         ds_train,
         ell, 
@@ -105,8 +105,9 @@ if __name__ == "__main__":
     print(f"Local test error (local model): {error.mean().item()*100:.2f}%")
 
     # Evaluate global
-    struct, state, rest = nnx.split(models, (nnx.Param, nnx.BatchStat), ...)
-    model = nnx.merge(struct, jax.tree.map(lambda p: p.mean(0), state), rest)
+    struct, _, rest = nnx.split(model_init, (nnx.Param, nnx.BatchStat), ...)
+    params = nnx.state(models, (nnx.Param, nnx.BatchStat))
+    model = nnx.merge(struct, jax.tree.map(lambda p: p.mean(0), params), rest)
     vtest_fn = nnx.jit(nnx.vmap(err_fn, in_axes=(None,0,0)))
     error = reduce(lambda acc, batch: acc + vtest_fn(model, *batch), ds_test, 0.) / len(ds_test)
     print(f"Global test error (aggregated model): {error.mean().item()*100:.2f}%")
