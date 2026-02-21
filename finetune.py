@@ -6,15 +6,39 @@ from fedflax import train
 from models import fetch_vit, AsymLinear, interleave
 from data import fetch_data
 from orbax import checkpoint
-from utils import load_model, nnx_norm
+from utils import nnx_norm
 from flax import nnx
 from functools import reduce
 from jax import numpy as jnp
 
+# Load Google's ViT as backbone and attach head, mixing flax.linen and flax.nnx
+class Classifier(nnx.Module):
+    def __init__(self, key=jax.random.key(0), **asymkwargs):
+        super().__init__()
+        self.dimexp = asymkwargs.get("dimexp", 1)
+        img_size = 224*self.dimexp
+        self.backbone, self.bbparams = fetch_vit(img_size=img_size)
+        self.bbparams = nnx.data(jax.tree.map(nnx.Param, self.bbparams))
+        keys = jax.random.split(key, 3)
+        self.fc1 = AsymLinear(768, 512, key=keys[0], **asymkwargs)
+        self.fc2 = AsymLinear(512, 128, key=keys[1], **asymkwargs)
+        self.fc3 = AsymLinear(128, 40, key=keys[2], **asymkwargs)
+
+    def __call__(self, x, train=False):
+        if self.dimexp>1: x = interleave(x, k=self.dimexp)
+        x = self.backbone.apply({"params": self.bbparams}, x, train=train)
+        x = x.reshape(x.shape[0], -1)
+        x, norm = self.fc1(x)
+        x = nnx.relu(x)
+        x, norm = self.fc2(x, norm)
+        x = nnx.relu(x)
+        x, norm = self.fc3(x, norm)
+        return x
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fine-tune ViT on CelebA with federated learning")
     parser.add_argument("--n_clients", type=int, default=4, help="Number of clients to simulate")
-    parser.add_argument("--asymtype", type=str, default="", choices=["", "wasym", "syre", "normweights", "dimexp"], help="Type of symmetry elimination to use")
+    parser.add_argument("--asymtype", type=str, default="", choices=["", "wasym", "syre", "normweights"], help="Type of symmetry elimination to use")
     args = parser.parse_args()
     n_clients = args.n_clients
     asymkwargs = {}
@@ -31,30 +55,6 @@ if __name__ == "__main__":
     elif args.asymtype == "dimexp":
         asymkwargs["dimexp"] = 1
     model_name = f"/data/bucket/traincombmodels/models/celeba_{args.asymtype or ('central' if n_clients==1 else 'base')}"
-
-    # Load Google's ViT as backbone and attach head, mixing flax.linen and flax.nnx
-    class Classifier(nnx.Module):
-        def __init__(self, key=jax.random.key(0), **asymkwargs):
-            super().__init__()
-            self.dimexp = asymkwargs.get("dimexp", 1)
-            img_size = 224*self.dimexp
-            self.backbone, self.bbparams = fetch_vit(img_size=img_size)
-            self.bbparams = nnx.data(jax.tree.map(nnx.Param, self.bbparams))
-            keys = jax.random.split(key, 3)
-            self.fc1 = AsymLinear(768, 512, key=keys[0], **asymkwargs)
-            self.fc2 = AsymLinear(512, 128, key=keys[1], **asymkwargs)
-            self.fc3 = AsymLinear(128, 40, key=keys[2], **asymkwargs)
-
-        def __call__(self, x, train=False):
-            if self.dimexp>1: x = interleave(x, k=self.dimexp)
-            x = self.backbone.apply({"params": self.bbparams}, x, train=train)
-            x = x.reshape(x.shape[0], -1)
-            x, norm = self.fc1(x)
-            x = nnx.relu(x)
-            x, norm = self.fc2(x, norm)
-            x = nnx.relu(x)
-            x, norm = self.fc3(x, norm)
-            return x
 
     # Model and optimizer
     model = Classifier(**asymkwargs)
