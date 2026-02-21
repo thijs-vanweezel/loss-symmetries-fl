@@ -20,9 +20,9 @@ class Classifier(nnx.Module):
         self.backbone, self.bbparams = fetch_vit(img_size=img_size)
         self.bbparams = nnx.data(jax.tree.map(nnx.Param, self.bbparams))
         keys = jax.random.split(key, 3)
-        self.fc1 = AsymLinear(768, 512, key=keys[0], **asymkwargs)
-        self.fc2 = AsymLinear(512, 128, key=keys[1], **asymkwargs)
-        self.fc3 = AsymLinear(128, 40, key=keys[2], **asymkwargs)
+        self.fc1 = AsymLinear(768, 512, key=keys[0], dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, **asymkwargs)
+        self.fc2 = AsymLinear(512, 128, key=keys[1], dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, **asymkwargs)
+        self.fc3 = AsymLinear(128, 40, key=keys[2], dtype=jnp.bfloat16, param_dtype=jnp.bfloat16, **asymkwargs)
 
     def __call__(self, x, train=False):
         if self.dimexp>1: x = interleave(x, k=self.dimexp)
