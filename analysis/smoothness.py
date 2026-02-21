@@ -63,6 +63,7 @@ abstract_model = nnx.eval_shape(lambda: cast(modelclass(**kwargs), n_clients))
 struct, stateref = nnx.split(abstract_model)
 with checkpoint.StandardCheckpointer() as cptr:
     state = cptr.restore(os.path.abspath(model_name), stateref)
+state = jax.tree.map(lambda p: p.astype(jnp.float32), state)
 models = nnx.merge(struct, state)
 
 # Calculate the dominant eigenvalue (lambda_max) of an nnx model using the power iteration method
@@ -74,7 +75,7 @@ def lambda_max(model, dataloader, key, max_iter=100):
     reconstruct = lambda th: nnx.merge(struct, th, rest)
 
     # Gradient of loss on this data
-    _grad_fn = nnx.grad(lambda th, x, y: loss_fn(reconstruct(th), y, x).astype(jnp.bfloat16), argnums=0)
+    _grad_fn = nnx.grad(lambda th, x, y: loss_fn(reconstruct(th), y, x), argnums=0)
 
     # Random normalized vector
     def random_like(arr): nonlocal key; _, key = jax.random.split(key); return jax.random.normal(key, arr.shape, arr.dtype)
