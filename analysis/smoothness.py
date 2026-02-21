@@ -38,7 +38,7 @@ elif args.dataset == "oxford":
 elif args.dataset == "imagenet":
     kwargs["layers"] = [3,4,6,3]
     modelclass = ResNet
-    dataloader = iter(fetch_data(skew="feature", partition="test", n_clients=n_clients, beta=1., dataset=1, batch_size=64))
+    dataloader = iter(fetch_data(skew="label", partition="test", n_clients=n_clients, beta=1., dataset=1, batch_size=64))
     _loss_fn = lambda m, y, x: optax.softmax_cross_entropy_with_integer_labels(m(x, train=False), y).mean()
 
 # Asymmetry parameters
