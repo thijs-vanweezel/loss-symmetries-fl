@@ -27,7 +27,7 @@ if __name__ == "__main__":
         asymkwargs["sigma"] = 1e-4
     elif args.asymtype == "dimexp":
         asymkwargs["dimexp"] = 1
-    model_name = f"/data/bucket/traincombmodels/models/oxford_{args.asymtype or ('central' if n_clients==1 else 'base')}"
+    model_name = f"/data/bucket/traincombmodels/models/oxford_{args.asymtype or ('central' if n_clients==1 else 'base')}_{args.n_clients}clients"
 
     # Initialize model
     model_init = UNETR(3, **asymkwargs)
