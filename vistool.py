@@ -1,4 +1,4 @@
-import jax, scipy, numpy as np, matplotlib as mpl
+import jax, scipy, numpy as np, matplotlib as mpl, pickle
 from jax import numpy as jnp
 from flax import nnx
 from functools import reduce
@@ -54,7 +54,7 @@ def compute_surface(alpha_grid, beta_grid, pca, reconstruct, ds, val_fn, interpo
         return errs, alpha_grid_fine, beta_grid_fine
     return errs
 
-def plot_trajectory(errs, pca, fps, alpha_grid, beta_grid, filename, labels=True):
+def plot_trajectory(errs, pca, fps, alpha_grid, beta_grid, filename, labels=True, n_clients=4):
     # Plot
     fig, ax = plt.subplots(figsize=(6,6), dpi=700)
     fig.tight_layout()
@@ -75,11 +75,12 @@ def plot_trajectory(errs, pca, fps, alpha_grid, beta_grid, filename, labels=True
         bar.set_label("Error")
     # Plot the model paths (assume params are sorted by optimization step)
     prev_coords = None
-    for i, fp in enumerate(fps):
+    r = 0
+    for fp in fps:
         # Flatten parameters
-        params = nnx.state(load_model(LeNet, fp), (nnx.Param, nnx.BatchStat))
-        params = jax.tree.reduce(lambda acc, p: jnp.concatenate([acc, p.reshape(p.shape[0],-1)], axis=1), params, jnp.empty((4,0)))
-        coords = pca.transform(params)
+        params = pickle.load(open(fp, "rb"))
+        params = jax.tree.reduce(lambda acc, p: jnp.concatenate([acc, p.reshape(p.shape[0],-1)], axis=1), params, jnp.empty((n_clients,0)))
+        coords = pca.transform(params) - 1.
         # Plot as line
         if prev_coords is not None:
             ax.add_collection(mpl.collections.LineCollection(
@@ -89,9 +90,12 @@ def plot_trajectory(errs, pca, fps, alpha_grid, beta_grid, filename, labels=True
             ))
         # Plot points
         aggregate = jnp.allclose(coords[0], coords[1])
-        colors = "red" if aggregate else [f"C{c}" for c in range(coords.shape[0])]
-        lw = 1 if aggregate and i==0 else 0
-        size = 10 if aggregate and i==0 else 7
+        if aggregate:
+            ax.annotate(r, xy=coords[0]+.07, c="w", fontsize=10)
+            r += 1; lw = 1; size = 10; colors = "black"
+        else: 
+            lw = 0; size = 7
+            colors = [f"C{c+1}" for c in range(coords.shape[0])]
         ax.scatter(coords[:,0], coords[:,1], c=colors, s=size, linewidths=lw, edgecolors="k", zorder=2)
         prev_coords = coords
     # Display accuracy of final aggregated model
@@ -100,8 +104,8 @@ def plot_trajectory(errs, pca, fps, alpha_grid, beta_grid, filename, labels=True
     # Show
     if labels:
         handles, labels = ax.get_legend_handles_labels()
-        handle = plt.Line2D([0], [0], marker="o", color="none", markerfacecolor="C0", label="Aggr point")
+        handle = plt.Line2D([0], [0], marker="o", color="none", markerfacecolor="black", label="Aggr point")
         ax.legend(handles + [handle], labels + ["Aggr point"], loc="upper left")
     plt.xticks([])
     plt.yticks([])
-    fig.savefig(filename)
+    fig.savefig(filename, bbox_inches="tight")
