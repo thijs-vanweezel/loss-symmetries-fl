@@ -7,22 +7,22 @@ from matplotlib import pyplot as plt
 from models import mask_linear_densest
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--wasym", action=argparse.BooleanOptionalAction, type=bool, default=False, choices=[False, True], 
+parser.add_argument("--wasym", action=argparse.BooleanOptionalAction, default=False, 
                     help="Whether to apply W-Asymmetry for eliminating permutation symmetries")
 args = parser.parse_args()
 wasym:bool = args.wasym
 
 plt.style.use("seaborn-v0_8-pastel")
-# plt.rcParams.update({
-#     "text.usetex": True,
-#     "font.family": "serif",
-#     "font.serif": ["Times"],
-#     "font.sans-serif": ["Helvetica"],
-#     "text.latex.preamble": r"""
-#         \usepackage{amsmath, amssymb}
-#         \usepackage{mathptmx}
-#     """
-# })
+plt.rcParams.update({
+    "text.usetex": True,
+    "font.family": "serif",
+    "font.serif": ["Times"],
+    "font.sans-serif": ["Helvetica"],
+    "text.latex.preamble": r"""
+        \usepackage{amsmath, amssymb}
+        \usepackage{mathptmx}
+    """
+})
 fig, ax = plt.subplots(figsize=(6,6), dpi=400)
 
 # The himmelblau function, of which we want to find one of the four minima
