@@ -32,29 +32,29 @@ def himmelblau(x):
         total += (x[2*i]**2 + x[2*i+1] - 11)**2 + (x[2*i] + x[2*i+1]**2 - 7)**2 
     return total
 
-for key in range(50):
-    keys = iter(jax.random.split(jax.random.key(key), 5))
+keys = jax.random.split(jax.random.key(42), 4)
+for inputkey in range(50):
     # Initialize parameters
-    paramstree = {"fc1": {"w": jax.nn.initializers.he_normal()(next(keys), (10,8)), "b": jnp.zeros((8,))}, 
-                "fc2": {"w": jax.nn.initializers.he_normal()(next(keys), (8,2)), "b": jnp.zeros((2,))}}
+    paramstree = {"fc1": {"w": jax.nn.initializers.he_normal()(keys[0], (10,8)), "b": jnp.zeros((8,))}, 
+                "fc2": {"w": jax.nn.initializers.he_normal()(keys[1], (8,2)), "b": jnp.zeros((2,))}}
     if wasym:
         mask = {"fc1": mask_linear_densest(*paramstree["fc1"]["w"].shape), "fc2": mask_linear_densest(*paramstree["fc2"]["w"].shape)}
-        randk = {"fc1": jax.random.normal(next(keys), (10,8)), "fc2": jax.random.normal(next(keys), (8,2))}
+        randk = {"fc1": jax.random.normal(keys[2], (10,8)), "fc2": jax.random.normal(keys[3], (8,2))}
     else:
         mask = {"fc1": jnp.ones((10,8)), "fc2": jnp.ones((8,2))}
         randk = {"fc1": jnp.zeros((10,8)), "fc2": jnp.zeros((8,2))}
     # Setup two-layer MLP
-    fixed_input = jax.random.uniform(next(keys), (10,))
+    fixed_input = jax.random.uniform(jax.random.key(inputkey), (10,))
     call = lambda ptree: jnp.dot(
-        jnp.dot(fixed_input, ptree["fc1"]["w"]*mask["fc1"] + randk["fc1"]*(1-mask["fc1"]))\
-            +ptree["fc1"]["b"], 
+        jax.nn.relu(jnp.dot(fixed_input, ptree["fc1"]["w"]*mask["fc1"] + randk["fc1"]*(1-mask["fc1"]))\
+            +ptree["fc1"]["b"]), 
         ptree["fc2"]["w"]*mask["fc2"] + randk["fc2"]*(1-mask["fc2"])
     )+ptree["fc2"]["b"]
     # Initialize optimizer
     opt = optax.adam(1e-3)
     opt_state = opt.init(paramstree)
-    # Precalculate shift so that starting point is where there is equal directional pull between two minima
-    shift = jnp.asarray([-0.09305561, -2.5609324]) - call(paramstree)
+    # Precalculate shift so that starting point is where there is equal directional pull between minima
+    shift = jnp.asarray([-0.48693585, -0.5074425]) - call(paramstree)
 
     # Train step is straightforward
     @jax.jit
@@ -72,7 +72,7 @@ for key in range(50):
     
     # Plot trajectory
     trajectory = jnp.asarray(trajectory)
-    ax.plot(*trajectory.T, color="gray", zorder=1, alpha=.5)
+    ax.plot(*trajectory.T, color="gray", zorder=1, alpha=.65)
 
 # Plot the himmelblau function
 loss_grid = jnp.empty((100,100))
