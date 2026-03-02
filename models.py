@@ -180,7 +180,7 @@ class ResNetBlock(nnx.Module):
         super().__init__()
         keys = jax.random.split(key, 5)
         self.stride = stride
-        self.norm1 = AsymBatchNorm(normweights, num_features=in_kernels, rngs=nnx.Rngs(keys[1]), param_dtype=jnp.float32, dtype=precision)
+        self.bn1 = AsymBatchNorm(normweights, num_features=in_kernels, rngs=nnx.Rngs(keys[1]), param_dtype=jnp.float32, dtype=precision)
         self.conv1 = AsymConv(
             in_kernels, 
             out_kernels,
@@ -196,7 +196,7 @@ class ResNetBlock(nnx.Module):
             dtype=precision,
             use_bias=False # due to subsequent BN
         )
-        self.norm2 = AsymBatchNorm(normweights, num_features=out_kernels, rngs=nnx.Rngs(keys[3]), param_dtype=jnp.float32, dtype=precision)
+        self.bn2 = AsymBatchNorm(normweights, num_features=out_kernels, rngs=nnx.Rngs(keys[3]), param_dtype=jnp.float32, dtype=precision)
         self.conv2 = AsymConv(
             out_kernels,
             out_kernels,
@@ -230,22 +230,24 @@ class ResNetBlock(nnx.Module):
 
     def __call__(self, x_in, train=True, norm_prev=None):
         # Pre-activation implementation
-        h, norm = self.norm1(x_in, use_running_average=not train, norm_prev=norm_prev)
+        x, norm1 = self.bn1(x_in, use_running_average=not train, norm_prev=norm_prev)
+        x = nnx.relu(x)
+        h, norm2 = self.conv1(x, norm1)
+        h, norm3 = self.bn2(h, use_running_average=not train, norm_prev=norm2)
         h = nnx.relu(h)
-        h, norm = self.conv1(h, norm)
-        h, norm = self.norm2(h, use_running_average=not train, norm_prev=norm)
-        h = nnx.relu(h)
-        h, norm = self.conv2(h, norm)
+        h, norm4 = self.conv2(h, norm3)
         # Apply identity downsampling if needed and perform scaling
-        if norm_prev is not None:
-            x_in = x_in*norm_prev
         if self.subsample:
-            x_in, _ = self.id_conv(x_in)
-        if norm is not None:
-            x_in /= norm
+            res, norm5 = self.id_conv(x, norm_prev=norm1)
+        elif norm_prev is not None:
+            res = x_in*norm_prev
+        else:
+            res = x_in
+        if norm4 is not None: # TODO: should we use norm5?
+            res /= norm4
         # Add residual
-        out = x_in+h
-        return out, norm
+        out = res+h
+        return out, norm4
 
 # Resnet for ImageNet ([3,4,6,3] for 34 layers, [2,2,2,2] for 18 layers)
 class ResNet(nnx.Module):
