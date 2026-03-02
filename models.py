@@ -194,7 +194,8 @@ class ResNetBlock(nnx.Module):
             padding="SAME",
             param_dtype=precision,
             dtype=precision,
-            use_bias=False # due to subsequent BN
+            use_bias=False, # due to subsequent BN
+            kernel_init=nnx.initializers.variance_scaling(2., "fan_out", "truncated_normal")
         )
         self.bn2 = AsymBatchNorm(normweights, num_features=out_kernels, rngs=nnx.Rngs(keys[3]), param_dtype=jnp.float32, dtype=precision)
         self.conv2 = AsymConv(
@@ -209,7 +210,8 @@ class ResNetBlock(nnx.Module):
             padding="SAME",
             param_dtype=precision,
             dtype=precision,
-            use_bias=False
+            use_bias=False,
+            kernel_init=nnx.initializers.variance_scaling(2., "fan_out", "truncated_normal")
         )
         self.subsample = stride>1 or in_kernels!=out_kernels
         if self.subsample:
@@ -225,7 +227,8 @@ class ResNetBlock(nnx.Module):
                 strides=(stride, stride), 
                 dtype=precision, 
                 param_dtype=precision,
-                use_bias=False
+                use_bias=False,
+                kernel_init=nnx.initializers.variance_scaling(2., "fan_out", "truncated_normal")
             )
 
     def __call__(self, x_in, train=True, norm_prev=None):
@@ -262,7 +265,8 @@ class ResNet(nnx.Module):
         keys = iter(jax.random.split(key, sum(layers)+3))
         # Layers
         self.conv = AsymConv(channels_in, 64, (7,7), next(keys), wasym, kappa, sigma, normweights,
-                             strides=(2,2), padding="SAME", param_dtype=precision, dtype=precision)
+                             strides=(2,2), padding="SAME", param_dtype=precision, dtype=precision,
+                             kernel_init=nnx.initializers.variance_scaling(2., "fan_out", "truncated_normal"))
         self.layers = nnx.List([])
         for j, l in enumerate(layers):
             for i in range(l):
@@ -272,8 +276,9 @@ class ResNet(nnx.Module):
                 self.layers.append(ResNetBlock(next(keys), k_in, k_out, stride=s, wasym=wasym, kappa=kappa, 
                                                sigma=sigma, normweights=normweights))
         self.bn = AsymBatchNorm(normweights, num_features=kernels[-1], rngs=nnx.Rngs(next(keys)), param_dtype=jnp.float32, dtype=precision)
-        self.fc = AsymLinear(kernels[-1], dim_out, next(keys), wasym, kappa, sigma, normweights=False, 
-                             param_dtype=precision, dtype=precision)
+        self.fc = AsymLinear(kernels[-1], dim_out, next(keys), wasym, kappa, sigma, 
+                             normweights=False, param_dtype=precision, dtype=precision,
+                             kernel_init=nnx.initializers.variance_scaling(2., "fan_out", "truncated_normal"))
     def __call__(self, x, train=True):
         # Apply dimension expansion if desired
         if self.dimexp>1: x=interleave(x, k=self.dimexp)
