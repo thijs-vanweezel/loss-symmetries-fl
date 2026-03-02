@@ -317,9 +317,8 @@ def jax_collate(batch, n_clients:int, beta:float, skew:str)->tuple[jnp.ndarray, 
     # Select and return
     clients_imgs = [imgs[idx] for idx in idxs]
     clients_labels = [labels[idx] for idx in idxs]
-    if gaze: clients_auxs = [auxs[idx] for idx in idxs]
-
     if gaze:
+        clients_auxs = [auxs[idx] for idx in idxs]
         return jnp.stack(clients_labels, 0), jnp.stack(clients_imgs, 0), jnp.stack(clients_auxs, 0)
     else:
         return jnp.stack(clients_labels, 0), jnp.stack(clients_imgs, 0)
@@ -345,7 +344,7 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
         assert skew in ["overlap", "feature"], "Skew must be either 'overlap' or 'feature'. For no skew, specify beta=0."
     elif dataset==3:
         dataset = CelebA(partition=partition, n_clients=n_clients)
-        assert skew in ["overlap", "label"], "Skew must be either 'overlap' or 'label'. For no skew, specify beta=0."
+        assert skew in ["overlap", "feature"], "Skew must be either 'overlap' or 'feature'. For no skew, specify beta=0."
     collate = partial(jax_collate, n_clients=n_clients, beta=new_beta, skew=skew)
     # Iterable batches
     return DataLoader(
