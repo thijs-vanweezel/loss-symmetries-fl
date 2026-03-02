@@ -211,7 +211,8 @@ class ResNetBlock(nnx.Module):
             dtype=jnp.bfloat16,
             use_bias=False
         )
-        if stride>1 and in_kernels!=out_kernels:
+        self.subsample = stride>1 or in_kernels!=out_kernels
+        if self.subsample:
             self.id_conv = AsymConv(
                 in_kernels, 
                 out_kernels, 
@@ -238,7 +239,7 @@ class ResNetBlock(nnx.Module):
         # Apply identity downsampling if needed and perform scaling
         if norm_prev is not None:
             x_in = x_in*norm_prev
-        if self.stride>1:
+        if self.subsample:
             x_in, _ = self.id_conv(x_in)
         if norm is not None:
             x_in /= norm
