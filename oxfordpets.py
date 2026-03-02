@@ -31,7 +31,7 @@ if __name__ == "__main__":
 
     # Initialize model
     model_init = UNETR(3, **asymkwargs)
-    lr = optax.warmup_exponential_decay_schedule(1e-4, .5, 500, 250, .9, end_value=1e-5)
+    lr = optax.warmup_exponential_decay_schedule(1e-6, 3e-3, 100, 250, .9, end_value=1e-5)
     opt = nnx.Optimizer(
         model_init,
         optax.adam(lr),
@@ -45,14 +45,14 @@ if __name__ == "__main__":
         miou_err = 1. - miou(jax.nn.softmax(logits, axis=-1), y)
         return ce + miou_err
     if args.asymtype == "syre":
-        loss_fn = lambda model, model_g, y, x: _loss_fn(model, model_g, y, x) + 1e-4*nnx_norm(nnx.state(model, nnx.Param), n_clients=n_clients).mean()
+        loss_fn = lambda model, model_g, y, x: _loss_fn(model, model_g, y, x) + 1e-4*nnx_norm(nnx.state(model, nnx.Param)).mean()
     else:
         loss_fn = _loss_fn
 
     # Load data
-    ds_train = fetch_data(beta=1., dataset=2, n_clients=n_clients, batch_size=64,
+    ds_train = fetch_data(beta=1., dataset=2, n_clients=n_clients, batch_size=64, skew="feature",
                         num_workers=6, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
-    ds_val = fetch_data(beta=1., dataset=2, partition="val", n_clients=n_clients, batch_size=64, 
+    ds_val = fetch_data(beta=1., dataset=2, partition="val", n_clients=n_clients, batch_size=64, skew="feature",
                         num_workers=4, prefetch_factor=1, multiprocessing_context=mp.get_context("spawn"))
 
     # Train (fixed number of epochs since test data is not available)
@@ -78,7 +78,7 @@ if __name__ == "__main__":
 
     # Load test data
     del ds_train, ds_val
-    ds_test = fetch_data(beta=1., dataset=2, partition="test", n_clients=n_clients, batch_size=64, 
+    ds_test = fetch_data(beta=1., dataset=2, partition="test", n_clients=n_clients, batch_size=64, skew="feature",
                          num_workers=4, prefetch_factor=1, multiprocessing_context=mp.get_context("spawn"))
 
     # Evaluate aggregated model
