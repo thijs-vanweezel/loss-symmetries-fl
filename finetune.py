@@ -69,9 +69,9 @@ if __name__ == "__main__":
     )
 
     # CelebA data
-    ds_train = fetch_data(beta=1., dataset=3, n_clients=n_clients, skew="label", batch_size=64,
+    ds_train = fetch_data(beta=1., dataset=3, n_clients=n_clients, skew="feature", batch_size=64,
                           num_workers=6, multiprocessing_context=mp.get_context("spawn"))
-    ds_val = fetch_data(beta=1., dataset=3, partition="val", n_clients=n_clients, skew="label", batch_size=64,
+    ds_val = fetch_data(beta=1., dataset=3, partition="val", n_clients=n_clients, skew="feature", batch_size=64,
                         num_workers=2, multiprocessing_context=mp.get_context("spawn"))
 
     # Train
@@ -96,7 +96,7 @@ if __name__ == "__main__":
 
     # Load test data
     del ds_train, ds_val
-    ds_test = fetch_data(beta=1., dataset=3, partition="test", n_clients=n_clients, skew="label",
+    ds_test = fetch_data(beta=1., dataset=3, partition="test", n_clients=n_clients, skew="feature",
                          num_workers=4, multiprocessing_context=mp.get_context("spawn"))
 
     # Evaluate local
