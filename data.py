@@ -153,14 +153,14 @@ class ImageNet(Dataset):
         label, img_path = self.data[c][i]
         with open(img_path, "rb") as f:
             bytesdata = torch.frombuffer(f.read(), dtype=torch.uint8)
-        img = torchvision.io.decode_image(bytesdata, mode="RGB").half() / 255.
+        img = torchvision.io.decode_image(bytesdata, mode="RGB").float() / 255.
         # Apply augmentations
         img = functional.resize(img, 256)
-        self.normalize(img)
         if self.partition=="train": 
             img, _ = train_aug(img, seed=self.seed)
             self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
         else: img = self.val_crop(img)
+        self.normalize(img)
         # Change to HWC
         img = torch.permute(img, (1,2,0))
         return label, img
@@ -192,8 +192,8 @@ class OxfordPets(Dataset):
                 os.path.join(path, "annotations", "trimaps", filename+".png")))
         for client in self.files:
             self.files[client].sort(key=lambda x: hashlib.sha256(str(x).encode()).hexdigest())
-        # Deterministic val augs
-        self.val_aug = v2.CenterCrop(224)
+        # Val aug
+        self.val_crop = v2.CenterCrop(224)
 
     def __len__(self):
         # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
@@ -213,8 +213,8 @@ class OxfordPets(Dataset):
             img, mask = train_aug(img, self.seed, mask)
             self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
         else:
-            img = self.val_aug(img)
-            mask = self.val_aug(mask)
+            img = self.val_crop(img)
+            mask = self.val_crop(mask)
         # Change to HWC
         img = torch.permute(img, (1,2,0))
         mask = torch.squeeze(mask)
@@ -229,7 +229,7 @@ class CelebA(Dataset):
         else:
             self.seed = torch.Generator()
             self.seed.manual_seed(42)
-        # Augmentations
+        # Augmentation
         self.val_crop = v2.CenterCrop(224)
         # Load filenames and labels
         with open(os.path.join(path, "identity_CelebA.txt")) as f:
@@ -264,7 +264,7 @@ class CelebA(Dataset):
         impath, label = self.files[client][i]
         with open(impath, "rb") as f:
             bytesdata = torch.frombuffer(f.read(), dtype=torch.uint8)
-        img = torchvision.io.decode_image(bytesdata, mode="RGB").half() / 255.
+        img = torchvision.io.decode_image(bytesdata, mode="RGB").float() / 255.
         # Augment
         img = functional.resize(img, 256)
         if self.partition=="train":
