@@ -176,11 +176,11 @@ class AsymBatchNorm(nnx.BatchNorm):
 # Used in resnet
 class ResNetBlock(nnx.Module):
     def __init__(self, key:jax.dtypes.prng_key, in_kernels:int, out_kernels:int, stride:int=1, 
-                 wasym:bool=False, kappa:float=1., sigma:float=0., normweights:bool=False):
+                 wasym:bool=False, kappa:float=1., sigma:float=0., normweights:bool=False, precision=jnp.float32):
         super().__init__()
         keys = jax.random.split(key, 5)
         self.stride = stride
-        self.norm1 = AsymBatchNorm(normweights, num_features=in_kernels, rngs=nnx.Rngs(keys[1]), param_dtype=jnp.float32, dtype=jnp.bfloat16)
+        self.norm1 = AsymBatchNorm(normweights, num_features=in_kernels, rngs=nnx.Rngs(keys[1]), param_dtype=jnp.float32, dtype=precision)
         self.conv1 = AsymConv(
             in_kernels, 
             out_kernels,
@@ -192,11 +192,11 @@ class ResNetBlock(nnx.Module):
             normweights,
             strides=(stride,stride),
             padding="SAME",
-            param_dtype=jnp.bfloat16,
-            dtype=jnp.bfloat16,
+            param_dtype=precision,
+            dtype=precision,
             use_bias=False # due to subsequent BN
         )
-        self.norm2 = AsymBatchNorm(normweights, num_features=out_kernels, rngs=nnx.Rngs(keys[3]), param_dtype=jnp.float32, dtype=jnp.bfloat16)
+        self.norm2 = AsymBatchNorm(normweights, num_features=out_kernels, rngs=nnx.Rngs(keys[3]), param_dtype=jnp.float32, dtype=precision)
         self.conv2 = AsymConv(
             out_kernels,
             out_kernels,
@@ -207,8 +207,8 @@ class ResNetBlock(nnx.Module):
             sigma,
             normweights,
             padding="SAME",
-            param_dtype=jnp.bfloat16,
-            dtype=jnp.bfloat16,
+            param_dtype=precision,
+            dtype=precision,
             use_bias=False
         )
         self.subsample = stride>1 or in_kernels!=out_kernels
@@ -223,8 +223,8 @@ class ResNetBlock(nnx.Module):
                 sigma, 
                 normweights=False,
                 strides=(stride, stride), 
-                dtype=jnp.bfloat16, 
-                param_dtype=jnp.bfloat16,
+                dtype=precision, 
+                param_dtype=precision,
                 use_bias=False
             )
 
@@ -251,7 +251,7 @@ class ResNetBlock(nnx.Module):
 class ResNet(nnx.Module):
     def __init__(self, key=jax.random.key(0), layers:tuple[int,...]=[2,2,2,2], kernels:tuple[int,...]=[64,128,256,512], 
                  channels_in:int=3, dim_out:int=1000, dimexp:int=1, wasym:bool=False, kappa:float=1., sigma:float=0., 
-                 normweights:bool=False, **kwargs):
+                 normweights:bool=False, precision=jnp.float32, **kwargs):
         assert len(layers)==len(kernels)
         # Set some params
         super().__init__(**kwargs)
@@ -260,7 +260,7 @@ class ResNet(nnx.Module):
         keys = iter(jax.random.split(key, sum(layers)+3))
         # Layers
         self.conv = AsymConv(channels_in, 64, (7,7), next(keys), wasym, kappa, sigma, normweights,
-                             strides=(2,2), padding="SAME", param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
+                             strides=(2,2), padding="SAME", param_dtype=precision, dtype=precision)
         self.layers = nnx.List([])
         for j, l in enumerate(layers):
             for i in range(l):
@@ -269,9 +269,9 @@ class ResNet(nnx.Module):
                 s = 2 if i==0 and j>0 else 1
                 self.layers.append(ResNetBlock(next(keys), k_in, k_out, stride=s, wasym=wasym, kappa=kappa, 
                                                sigma=sigma, normweights=normweights))
-        self.bn = AsymBatchNorm(normweights, num_features=kernels[-1], rngs=nnx.Rngs(next(keys)), param_dtype=jnp.float32, dtype=jnp.bfloat16)
+        self.bn = AsymBatchNorm(normweights, num_features=kernels[-1], rngs=nnx.Rngs(next(keys)), param_dtype=jnp.float32, dtype=precision)
         self.fc = AsymLinear(kernels[-1], dim_out, next(keys), wasym, kappa, sigma, normweights=False, 
-                             param_dtype=jnp.bfloat16, dtype=jnp.bfloat16)
+                             param_dtype=precision, dtype=precision)
     def __call__(self, x, train=True):
         # Apply dimension expansion if desired
         if self.dimexp>1: x=interleave(x, k=self.dimexp)
