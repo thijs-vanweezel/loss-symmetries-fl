@@ -5,7 +5,7 @@ os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 import jax, optax, os, multiprocessing as mp, argparse
 from fedflax import train, get_updates, aggregate
 from unetr import UNETR
-from data import fetch_data
+from data import fetch_data, seed_worker
 from orbax import checkpoint
 from utils import miou, nnx_norm
 from jax import numpy as jnp
@@ -50,8 +50,8 @@ if __name__ == "__main__":
         loss_fn = _loss_fn
 
     # Load data
-    ds_train = fetch_data(beta=1., dataset=2, n_clients=n_clients, batch_size=64, skew="feature",
-                        num_workers=6, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
+    ds_train = fetch_data(beta=1., dataset=2, n_clients=n_clients, batch_size=64, skew="feature", num_workers=6,
+                        multiprocessing_context=mp.get_context("spawn"), persistent_workers=True, worker_init_fn=seed_worker)
     ds_val = fetch_data(beta=1., dataset=2, partition="val", n_clients=n_clients, batch_size=64, skew="feature",
                         num_workers=4, prefetch_factor=1, multiprocessing_context=mp.get_context("spawn"))
 

@@ -4,7 +4,7 @@ os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 import jax, optax, multiprocessing as mp, argparse
 from fedflax import train
 from models import fetch_vit, AsymLinear, interleave
-from data import fetch_data
+from data import fetch_data, seed_worker
 from orbax import checkpoint
 from utils import nnx_norm
 from flax import nnx
@@ -70,7 +70,7 @@ if __name__ == "__main__":
 
     # CelebA data
     ds_train = fetch_data(beta=1., dataset=3, n_clients=n_clients, skew="feature", batch_size=64,
-                          num_workers=6, multiprocessing_context=mp.get_context("spawn"))
+                          num_workers=6, multiprocessing_context=mp.get_context("spawn"), worker_init_fn=seed_worker)
     ds_val = fetch_data(beta=1., dataset=3, partition="val", n_clients=n_clients, skew="feature", batch_size=64,
                         num_workers=2, multiprocessing_context=mp.get_context("spawn"))
 
