@@ -5,7 +5,7 @@ import jax, optax, argparse, multiprocessing as mp
 from fedflax import train, aggregate, get_updates
 from flax import nnx
 from models import ResNet
-from data import fetch_data
+from data import fetch_data, seed_worker
 from functools import reduce
 from utils import return_ce, top_5_err, err_fn, nnx_norm
 from orbax import checkpoint
@@ -41,10 +41,10 @@ if __name__ == "__main__":
         layers = [2,2,2,2]
 
     # Get data
-    ds_train = fetch_data(beta=1., skew="label", dataset=1, n_clients=n_clients, n_classes=n_classes,
-                          num_workers=8, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
-    ds_val = fetch_data(partition="val", beta=1., skew="label", dataset=1, n_clients=n_clients, n_classes=n_classes,
-                        num_workers=4, prefetch_factor=1, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
+    ds_train = fetch_data(beta=1., skew="label", dataset=1, n_clients=n_clients, n_classes=n_classes, num_workers=8,
+                          multiprocessing_context=mp.get_context("spawn"), persistent_workers=True, worker_init_fn=seed_worker)
+    ds_val = fetch_data(partition="val", beta=1., skew="label", dataset=1, n_clients=n_clients, n_classes=n_classes, num_workers=4,
+                        prefetch_factor=1, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True, worker_init_fn=seed_worker)
 
     # Initialize model and optimizer
     model_init = ResNet(jax.random.key(42), dim_out=n_classes, layers=layers, **asymkwargs)
@@ -72,7 +72,7 @@ if __name__ == "__main__":
     # Load test data
     del ds_train, ds_val
     ds_test = fetch_data(partition="test", beta=1., skew="label", dataset=1, n_clients=n_clients, n_classes=n_classes,
-                         num_workers=4, multiprocessing_context=mp.get_context("spawn"))
+                         num_workers=4, multiprocessing_context=mp.get_context("spawn"), worker_init_fn=seed_worker)
 
     # Evaluate global performance
     vval_fn = nnx.jit(nnx.vmap(top_5_err, in_axes=(None,0,0)))
