@@ -173,7 +173,7 @@ class OxfordPets(Dataset):
         if seed is not None: self.seed = seed 
         else:
             self.seed = torch.Generator()
-            self.seed.manual_seed(42)
+            self.seed.manual_seed(torch.randint(0, int(1e6), ()).item())
         # Load filenames and breed
         with open(os.path.join(path, "annotations", "list.txt")) as f:
             lines = f.readlines()[6:]
@@ -229,7 +229,7 @@ class CelebA(Dataset):
         if seed is not None: self.seed = seed 
         else:
             self.seed = torch.Generator()
-            self.seed.manual_seed(42)
+            self.seed.manual_seed(torch.randint(0, int(1e6), ()).item())
         # Augmentation
         self.val_crop = v2.CenterCrop(224)
         # Load filenames and labels
