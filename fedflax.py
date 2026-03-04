@@ -100,7 +100,7 @@ def train(model_g:nnx.Module, opt:nnx.Optimizer, ds_train, ell, ds_val=None, loc
                 # Train step
                 loss = train_step(models, model_g, opt, y, *xs)
                 # Inform user
-                bar.set_description(f"Round {r}/{rounds}, epoch {epoch}/{local_epochs} (local validation score: {'N/A' if epoch==0 or local_epochs!='early' else val}, local batch loss: {loss.mean():.4f})")
+                bar.set_description(f"Round {r}/{rounds}, epoch {epoch}/{local_epochs}, patience {local_patience}/{max_patience}, local epoch validation: {'N/A' if epoch==0 or local_epochs!='early' else val}, local batch loss: {loss.mean():.4f}")
             # Evaluate on local validation
             models.eval()
             if local_epochs=="early":
@@ -132,7 +132,7 @@ def train(model_g:nnx.Module, opt:nnx.Optimizer, ds_train, ell, ds_val=None, loc
             val = reduce(lambda a, batch: a+val_fn(model_g, *batch).mean(), ds_val, 0.)
             val /= len(ds_val)
             val_losses.append(val)       
-            print(f"round {r} ({epoch} local epochs); global validation score: {val:.4f}")
+            print(f"round {r} ({epoch} local epochs), patience {patience}/{max_patience}, global validation score: {val:.4f}")
             # Check whether model has converged
             if r>=1 and val>=val_losses[-patience-1]:
                 patience += 1
