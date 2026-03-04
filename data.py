@@ -9,6 +9,8 @@ from collections import defaultdict
 from tqdm.auto import tqdm
 torch.multiprocessing.set_sharing_strategy("file_system")
 
+def seed_worker(worker_id): torch.manual_seed(worker_id)
+
 def train_aug(img:torch.Tensor, seed, mask:torch.Tensor=None):
     """Deterministic train augmentations"""
     # Flip
@@ -92,7 +94,7 @@ class ImageNet(Dataset):
         if seed is not None: self.seed = seed 
         else:
             self.seed = torch.Generator()
-            self.seed.manual_seed(42)
+            self.seed.manual_seed(torch.randint(0, int(1e6), ()).item())
         # Augmentations
         self.val_crop = v2.CenterCrop(224)
         self.normalize = v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], inplace=True)
