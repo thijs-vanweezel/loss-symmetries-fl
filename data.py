@@ -100,21 +100,20 @@ class ImageNet(Dataset):
         if not os.path.exists(path):
             self.repartition(originalpath, path)
         self.partition = partition
-        g = os.walk(os.path.join(path, partition))
-        _ = next(g)
         # Get class names and limit to n_classes by skipping
         with open(os.path.join(path, "mapping.txt")) as f:
             classes = f.readlines()
         classes = classes[::len(classes)//n_classes]
-        classes = {line.split()[0]: i for i, line in enumerate(classes)}
+        classes = {i:line.split()[0] for i, line in enumerate(classes)}
         # Assign sample paths to each client
         self.data = {c: [] for c in range(n_clients)}
         client = 0
-        for dirname, _, filelist in tqdm(g, leave=False, total=n_classes):
-            classname = os.path.basename(dirname)
+        for class_idx in range(n_classes):
+            classname = classes[class_idx]
             # Only n_classes
-            if classname in classes.keys():
-                class_idx = classes[classname]
+            if classname in classes.values():
+                dirname = os.path.join(path, partition, classname)
+                filelist = os.listdir(dirname)
                 # Insert at interleaved indices so that samples are not ordered by class (note: deterministic)
                 for i, file in enumerate(filelist):
                     self.data[client].insert(
