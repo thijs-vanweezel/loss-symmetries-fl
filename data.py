@@ -118,7 +118,7 @@ class ImageNet(Dataset):
                 # Insert at interleaved indices so that samples are not ordered by class (note: deterministic)
                 for i, file in enumerate(filelist):
                     self.data[client].insert(
-                        i*(class_idx-n_classes//n_clients*client), 
+                        i*(class_idx//n_clients+1), 
                         (class_idx, os.path.join(dirname, file))
                     )
                 client = (client+1) % n_clients
