@@ -176,7 +176,7 @@ class AsymBatchNorm(nnx.BatchNorm):
 # Used in resnet
 class ResNetBlock(nnx.Module):
     def __init__(self, key:jax.dtypes.prng_key, in_kernels:int, out_kernels:int, stride:int=1, 
-                 wasym:bool=False, kappa:float=1., sigma:float=0., normweights:bool=False, precision=jnp.float32):
+                 wasym:bool=False, kappa:float=1., sigma:float=0., normweights:bool=False, precision=jnp.bfloat16):
         super().__init__()
         keys = jax.random.split(key, 5)
         self.stride = stride
@@ -255,7 +255,7 @@ class ResNetBlock(nnx.Module):
 class ResNet(nnx.Module):
     def __init__(self, key=jax.random.key(0), layers:tuple[int,...]=[2,2,2,2], kernels:tuple[int,...]=[64,128,256,512], 
                  channels_in:int=3, dim_out:int=1000, dimexp:int=1, wasym:bool=False, kappa:float=1., sigma:float=0., 
-                 normweights:bool=False, precision=jnp.float32, **kwargs):
+                 normweights:bool=False, precision=jnp.bfloat16, **kwargs):
         assert len(layers)==len(kernels)
         # Set some params
         super().__init__(**kwargs)
@@ -264,7 +264,7 @@ class ResNet(nnx.Module):
         keys = iter(jax.random.split(key, sum(layers)+3))
         # Layers
         self.conv = AsymConv(channels_in, kernels[0], (7,7), next(keys), wasym, kappa, sigma, normweights,
-                             strides=(2,2), padding="SAME", param_dtype=precision, dtype=precision,
+                             strides=(2,2), padding="SAME", param_dtype=precision, dtype=precision, use_bias=False,
                              kernel_init=nnx.initializers.variance_scaling(2., "fan_out", "truncated_normal"))
         self.bn = AsymBatchNorm(normweights, num_features=kernels[0], rngs=nnx.Rngs(next(keys)), param_dtype=jnp.float32, dtype=precision)
         self.layers = nnx.List([])
