@@ -93,6 +93,7 @@ class ImageNet(Dataset):
         # Set random seed. Wait for global seed to be set, so that each worker gets different seed.
         self.diff_seed = None 
         self.same_seed = torch.Generator()
+        self.same_seed.manual_seed(42)
         # Augmentations
         self.val_crop = v2.CenterCrop(224)
         self.normalize = v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], inplace=True)
@@ -150,7 +151,6 @@ class ImageNet(Dataset):
             self.diff_seed.manual_seed(torch.randint(0, int(1e6), ()).item())
         # Shuffle per client at each epoch
         if idx<self.prev_idx:
-            self.same_seed.manual_seed(42)
             for c in self.data.keys():
                 sorter = iter(torch.randperm(len(self.data[c]), generator=self.same_seed).tolist())
                 self.data[c].sort(key=lambda _: next(sorter))
@@ -179,6 +179,7 @@ class OxfordPets(Dataset):
         # Set random seed. Wait for global seed to be set, so that each worker gets different seed.
         self.diff_seed = None 
         self.same_seed = torch.Generator()
+        self.same_seed.manual_seed(42)
         # Load filenames and breed
         with open(os.path.join(path, "annotations", "list.txt")) as f:
             lines = f.readlines()[6:]
@@ -211,7 +212,6 @@ class OxfordPets(Dataset):
             self.diff_seed.manual_seed(torch.randint(0, int(1e6), ()).item())
         # Shuffle per client at each epoch
         if idx<self.prev_idx:
-            self.same_seed.manual_seed(42)
             for c in self.files.keys():
                 sorter = iter(torch.randperm(len(self.files[c]), generator=self.same_seed).tolist())
                 self.files[c].sort(key=lambda _: next(sorter))
@@ -243,6 +243,7 @@ class CelebA(Dataset):
         # Set random seed. Wait for global seed to be set, so that each worker gets different seed.
         self.diff_seed = None 
         self.same_seed = torch.Generator()
+        self.same_seed.manual_seed(42)
         # Augmentation
         self.val_crop = v2.CenterCrop(224)
         # Load filenames and labels
@@ -279,7 +280,6 @@ class CelebA(Dataset):
             self.diff_seed.manual_seed(torch.randint(0, int(1e6), ()).item())
         # Shuffle per client at each epoch
         if idx<self.prev_idx:
-            self.same_seed.manual_seed(42)
             for c in self.files.keys():
                 sorter = iter(torch.randperm(len(self.files[c]), generator=self.same_seed).tolist())
                 self.files[c].sort(key=lambda _: next(sorter))
