@@ -1,4 +1,4 @@
-import os, torch, shutil, torchvision, hashlib
+import os, torch, shutil, torchvision, hashlib, random
 from torchvision.transforms import v2
 from torchvision.transforms.v2 import functional
 from scipy.io import loadmat
@@ -89,12 +89,10 @@ class MPIIGaze(Dataset):
 
 class ImageNet(Dataset):
     def __init__(self, path:str="/data/bucket/traincombmodels/imnetproc", partition:str="train", n_clients:int=4, 
-                 n_classes:int=1000, originalpath:str="/data/bucket/traincombmodels/imagenet", seed=None):
-        # Set random seed
-        if seed is not None: self.seed = seed 
-        else:
-            self.seed = torch.Generator()
-            self.seed.manual_seed(torch.randint(0, int(1e6), ()).item())
+                 n_classes:int=1000, originalpath:str="/data/bucket/traincombmodels/imagenet"):
+        # Set random seed. Wait for global seed to be set, so that each worker gets different seed.
+        self.diff_seed = None 
+        self.same_seed = torch.Generator()
         # Augmentations
         self.val_crop = v2.CenterCrop(224)
         self.normalize = v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], inplace=True)
@@ -116,13 +114,11 @@ class ImageNet(Dataset):
             if classname in classes.values():
                 dirname = os.path.join(path, partition, classname)
                 filelist = os.listdir(dirname)
-                # Insert at interleaved indices so that samples are not ordered by class (note: deterministic)
-                for i, file in enumerate(filelist):
-                    self.data[client].insert(
-                        i*(class_idx//n_clients+1), 
-                        (class_idx, os.path.join(dirname, file))
-                    )
+                self.data[client].extend([
+                    (class_idx, os.path.join(dirname, file)) for file in filelist
+                ])
                 client = (client+1) % n_clients
+        self.prev_idx = float("inf")
         # Misc attributes
         self.n_clients = n_clients
         self.n_classes = n_classes
@@ -148,6 +144,17 @@ class ImageNet(Dataset):
         return min([len(files) for files in self.data.values()])*self.n_clients
     
     def __getitem__(self, idx):
+        # Initialize seed with global seed
+        if self.diff_seed is None:
+            self.diff_seed = torch.Generator()
+            self.diff_seed.manual_seed(torch.randint(0, int(1e6), ()).item())
+        # Shuffle per client at each epoch
+        if idx<self.prev_idx:
+            self.same_seed.manual_seed(42)
+            for c in self.data.keys():
+                sorter = iter(torch.randperm(len(self.data[c]), generator=self.same_seed).tolist())
+                self.data[c].sort(key=lambda _: next(sorter))
+        self.prev_idx = idx
         # Load datum
         c = idx % self.n_clients
         i = idx // self.n_clients
@@ -158,8 +165,7 @@ class ImageNet(Dataset):
         # Apply augmentations
         img = functional.resize(img, 256)
         if self.partition=="train": 
-            img, _ = train_aug(img, seed=self.seed)
-            self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
+            img, _ = train_aug(img, seed=self.diff_seed)
         else: img = self.val_crop(img)
         self.normalize(img)
         # Change to HWC
@@ -167,13 +173,12 @@ class ImageNet(Dataset):
         return label, img
 
 class OxfordPets(Dataset):
-    def __init__(self, path:str="/data/bucket/traincombmodels/oxford_pets", partition="train", seed=None, n_clients=4):
+    def __init__(self, path:str="/data/bucket/traincombmodels/oxford_pets", partition="train", n_clients=4):
         self.n_clients = n_clients
         self.partition = partition
-        if seed is not None: self.seed = seed 
-        else:
-            self.seed = torch.Generator()
-            self.seed.manual_seed(torch.randint(0, int(1e6), ()).item())
+        # Set random seed. Wait for global seed to be set, so that each worker gets different seed.
+        self.diff_seed = None 
+        self.same_seed = torch.Generator()
         # Load filenames and breed
         with open(os.path.join(path, "annotations", "list.txt")) as f:
             lines = f.readlines()[6:]
@@ -191,8 +196,7 @@ class OxfordPets(Dataset):
             self.files[client].append((
                 os.path.join(path, "images", filename+".jpg"), 
                 os.path.join(path, "annotations", "trimaps", filename+".png")))
-        for client in self.files:
-            self.files[client].sort(key=lambda x: hashlib.sha256(str(x).encode()).hexdigest())
+        self.prev_idx = float("inf")
         # Val aug
         self.val_crop = v2.CenterCrop(224)
 
@@ -201,6 +205,18 @@ class OxfordPets(Dataset):
         return min([len(files) for files in self.files.values()])*self.n_clients
 
     def __getitem__(self, idx: int):
+        # Initialize seed with global seed
+        if self.diff_seed is None:
+            self.diff_seed = torch.Generator()
+            self.diff_seed.manual_seed(torch.randint(0, int(1e6), ()).item())
+        # Shuffle per client at each epoch
+        if idx<self.prev_idx:
+            self.same_seed.manual_seed(42)
+            for c in self.files.keys():
+                sorter = iter(torch.randperm(len(self.files[c]), generator=self.same_seed).tolist())
+                self.files[c].sort(key=lambda _: next(sorter))
+        self.prev_idx = idx
+        # Convert index
         client = idx % len(self.files)
         i = idx // len(self.files)
         impath, maskpath = self.files[client][i]
@@ -211,8 +227,7 @@ class OxfordPets(Dataset):
         img = functional.resize(img, 256)
         mask = functional.resize(mask, 256, interpolation=v2.InterpolationMode.NEAREST, antialias=False)
         if self.partition=="train": 
-            img, mask = train_aug(img, self.seed, mask)
-            self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
+            img, mask = train_aug(img, self.diff_seed, mask)
         else:
             img = self.val_crop(img)
             mask = self.val_crop(mask)
@@ -222,14 +237,12 @@ class OxfordPets(Dataset):
         return mask, img
 
 class CelebA(Dataset):
-    def __init__(self, path:str="/data/bucket/traincombmodels/celeba", partition="train", n_clients=4, seed=None):
+    def __init__(self, path:str="/data/bucket/traincombmodels/celeba", partition="train", n_clients=4):
         self.n_clients = n_clients
         self.partition = partition
-        # Set random seed for augmentations
-        if seed is not None: self.seed = seed 
-        else:
-            self.seed = torch.Generator()
-            self.seed.manual_seed(torch.randint(0, int(1e6), ()).item())
+        # Set random seed. Wait for global seed to be set, so that each worker gets different seed.
+        self.diff_seed = None 
+        self.same_seed = torch.Generator()
         # Augmentation
         self.val_crop = v2.CenterCrop(224)
         # Load filenames and labels
@@ -253,12 +266,25 @@ class CelebA(Dataset):
             # One-hot encoded label
             label = torch.tensor([(int(attrib)+1)//2 for attrib in attribs])
             self.files[client].append((os.path.join(path, "images", filename), label))
+        self.prev_idx = float("inf")
         
     def __len__(self):
         # Take minimum of client lengths (many papers focus on quantity imbalance, which we do not address)
         return min([len(files) for files in self.files.values()])*self.n_clients
         
     def __getitem__(self, idx):
+        # Initialize seed with global seed
+        if self.diff_seed is None:
+            self.diff_seed = torch.Generator()
+            self.diff_seed.manual_seed(torch.randint(0, int(1e6), ()).item())
+        # Shuffle per client at each epoch
+        if idx<self.prev_idx:
+            self.same_seed.manual_seed(42)
+            for c in self.files.keys():
+                sorter = iter(torch.randperm(len(self.files[c]), generator=self.same_seed).tolist())
+                self.files[c].sort(key=lambda _: next(sorter))
+        # Convert index
+        self.prev_idx = idx
         client = idx % len(self.files)
         i = idx // len(self.files)
         # Load
@@ -269,8 +295,7 @@ class CelebA(Dataset):
         # Augment
         img = functional.resize(img, 256)
         if self.partition=="train":
-            img, _ = train_aug(img, seed=self.seed)
-            self.seed.manual_seed(torch.randint(0, int(1e6), (), generator=self.seed).item())
+            img, _ = train_aug(img, seed=self.diff_seed)
         else: img = self.val_crop(img)
         # Change to HWC
         img = torch.permute(img, (1,2,0)).float()
@@ -352,7 +377,9 @@ def fetch_data(skew:str="overlap", batch_size=128, n_clients=4, beta:float=0, da
         dataset,
         batch_size=new_batch_size,
         collate_fn=collate,
-        shuffle=False,
         drop_last=True,
+        # Important to guarantee correct interleaving (even with num_workers>0):
+        shuffle=False, 
+        sampler=None,
         **kwargs
     )
