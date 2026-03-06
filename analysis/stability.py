@@ -75,7 +75,7 @@ if __name__ == "__main__":
         err:jnp.array = reduce(lambda acc, b: acc + err_fn(models_agg,*b), ds_test, 0.) / len(ds_test)
         lmc[alpha] = err#.tolist()
     # Get instability measure as described by Frankle
-    max_alpha = max(lmc, key=lmc.get)
+    max_alpha = max(lmc, key=lambda k: lmc[k].mean().item())
     instability = lmc[max_alpha] - ((1-max_alpha)*lmc[0.] + max_alpha*lmc[1.])
     instability = instability.mean().item()
-    print(f"Instability measure: {instability}, max alpha: {max_alpha}, wasym used: {args.wasym}, drift type: {args.drift_type}")
+    print(f"Mean instability over clients: {instability}, at alpha: {max_alpha}. W-Asymmetry used: {args.wasym}; drift type: {args.drift_type}")
