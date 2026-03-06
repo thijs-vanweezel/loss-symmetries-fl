@@ -12,7 +12,7 @@ sys.path.append(os.path.split(os.path.dirname(os.path.abspath(__file__)))[0])
 import jax, optax, argparse, multiprocessing as mp
 from fedflax import train
 from models import ResNet
-from data import fetch_data
+from data import fetch_data, seed_worker
 from utils import return_ce, top_5_err
 from jax import numpy as jnp
 from flax import nnx
@@ -44,12 +44,15 @@ if __name__ == "__main__":
         beta = 0.
 
     # Get datasets
-    ds_train = fetch_data(skew, beta=beta, n_clients=n_clients, dataset=1, n_classes=100)
-    ds_test = fetch_data(skew, partition="test", beta=beta, n_clients=n_clients, dataset=1, n_classes=100)
-    ds_val = fetch_data(skew, partition="val", beta=beta, n_clients=n_clients, dataset=1, n_classes=100)
+    ds_train = fetch_data(skew, beta=beta, n_clients=n_clients, dataset=1, n_classes=100, num_workers=8,
+                          multiprocessing_context=mp.get_context("spawn"), persistent_workers=True, worker_init_fn=seed_worker)
+    ds_test = fetch_data(skew, partition="test", beta=beta, n_clients=n_clients, dataset=1, n_classes=100, num_workers=4,
+                          multiprocessing_context=mp.get_context("spawn"), persistent_workers=True, worker_init_fn=seed_worker)
+    ds_val = fetch_data(skew, partition="val", beta=beta, n_clients=n_clients, dataset=1, n_classes=100, num_workers=4,
+                          multiprocessing_context=mp.get_context("spawn"), persistent_workers=True, worker_init_fn=seed_worker)
 
     # Get model
-    model_g = ResNet(key=jax.random.key(42), layers=[2,2,2,2], num_classes=100, **asymkwargs)
+    model_g = ResNet(key=jax.random.key(42), layers=[2,2,2,2], dim_out=100, **asymkwargs)
     lr = optax.warmup_exponential_decay_schedule(1e-6, 3e-3, 1000, 2000, 0.9, end_value=1e-5)
     opt = nnx.Optimizer(
         model_g,
