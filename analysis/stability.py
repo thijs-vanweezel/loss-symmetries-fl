@@ -67,7 +67,7 @@ if __name__ == "__main__":
     
     # Check LMC
     err_fn = nnx.jit(nnx.vmap(
-        lambda model, y, *xs: optax.softmax_cross_entropy_with_integer_labels(model(*xs, train=True), y, axis=-1).mean()
+        lambda model, y, x: optax.softmax_cross_entropy_with_integer_labels(model(x, train=True), y, axis=-1).mean()
     ))
     lmc = {}
     for alpha in tqdm(jnp.linspace(0.,1.,30).tolist(), leave=False):
