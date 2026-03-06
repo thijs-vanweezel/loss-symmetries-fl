@@ -1,11 +1,12 @@
 # Four potential outcomes in a scenario where client drift is induced with label heterogeneity:
-# 1. FedAvg exhibits high barriar, but W-Asym does not. According to Entezari (and to logic), the local solutions are stochastic, and removing permutation symmetries resolves this.
-# 2. FedAvg does not exhibit high barriar, neither does W-Asym. Client drift was then not a problem in the first place, so W-Asym does not help.
-# 3. FedAvg does not exhibit high barriar, but W-Asym does. Simply will not happen.
-# 4. FedAvg exhibits high barriar, as well as W-Asym. This prompts more possibilities, in which _homogeneous_ client drift is assessed, meaning that solutions are certainly stochastic symmetries:
-# 4a. FedAvg exhibits high barriar, but W-Asymmetry does not. According to Entezari (and logic), W-Asymmetry removes all symmetries, but in the previous scenario, the local solutions were not stochastic.
-# 4b. FedAvg and W-Asym both exhibit high barriar. According to Entezari, W-Asymmetry does not remove all permutation symmetries.
-# 4c is equivalent to 2, and 4d is equivalent to 3.
+# 1. FedAvg exhibits high barrier, but W-Asym does not. According to Entezari (and to logic), the local solutions are stochastic, and removing permutation symmetries resolves this.
+# 2. FedAvg does not exhibit high barrier, neither does W-Asym. Client drift was then not a problem in the first place, so W-Asym does not help.
+# 3. FedAvg does not exhibit high barrier, but W-Asym does. Simply will not happen.
+# 4. FedAvg exhibits high barrier, as well as W-Asym. This prompts more possibilities, in which _homogeneous_ client drift is assessed, meaning that solutions are certainly stochastic symmetries:
+# 4a. FedAvg exhibits high barrier, but W-Asymmetry does not. According to Entezari (and logic), W-Asymmetry removes all symmetries, but in the previous scenario, the local solutions were not stochastic.
+# 4b. FedAvg and W-Asym both exhibit high barrier. According to Entezari, W-Asymmetry does not remove all permutation symmetries.
+# 4c. FedAvg and W-Asym both exhibit low barrier. Then stochastic client drift is not a problem, in contrast to the previous scenario.
+# 4d. FedAvg does not exhibit high barrier, but W-Asymmetry does. This will not happen.
 
 import os, sys
 sys.path.append(os.path.split(os.path.dirname(os.path.abspath(__file__)))[0])
