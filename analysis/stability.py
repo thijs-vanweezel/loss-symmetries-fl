@@ -75,8 +75,8 @@ if __name__ == "__main__":
         models_agg = partial_aggregate(fl_models, alpha)
         err:jnp.array = reduce(lambda acc, b: acc + err_fn(models_agg,*b), ds_test, 0.) / len(ds_test)
         lmc[alpha] = err#.tolist()
-    # Get instability measure as described by Frankle
+    # Get instability measure inspired by Frankle
     max_alpha = max(lmc, key=lambda k: lmc[k].mean().item())
-    instability = lmc[max_alpha] - ((1-max_alpha)*lmc[0.] + max_alpha*lmc[1.])
+    instability = lmc[max_alpha] - lmc[0.].mean()
     instability = instability.mean().item()
     print(f"Mean instability over clients: {instability}, at alpha: {max_alpha}. W-Asymmetry used: {args.wasym}; drift type: {args.drift_type}")
