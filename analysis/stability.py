@@ -17,6 +17,7 @@ from utils import return_ce, top_5_err
 from jax import numpy as jnp
 from flax import nnx
 from functools import reduce
+from tqdm.auto import tqdm
 
 def partial_aggregate(models, alpha):
     struct, params, rest = nnx.split(models, (nnx.Param, nnx.BatchStat), ...)
@@ -69,7 +70,7 @@ if __name__ == "__main__":
         lambda model, y, *xs: optax.softmax_cross_entropy_with_integer_labels(model(*xs, train=True), y, axis=-1).mean()
     ))
     lmc = {}
-    for alpha in jnp.linspace(0., 1., 50):
+    for alpha in tqdm(jnp.linspace(0.,1.,30).tolist(), leave=False):
         models_agg = partial_aggregate(fl_models, alpha)
         err:jnp.array = reduce(lambda acc, b: acc + err_fn(models_agg,*b), ds_test, 0.) / len(ds_test)
         lmc[alpha] = err#.tolist()
