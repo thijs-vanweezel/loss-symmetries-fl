@@ -1,7 +1,8 @@
-import jax, optax, pickle
+import jax, optax, os
 from jax import numpy as jnp
 from flax import nnx
 from functools import reduce
+from orbax import checkpoint
 
 # Regression loss
 def return_l2(omega):
@@ -71,19 +72,15 @@ def functional_drift(models, ds_test):
     return drift
 
 def save_model(model, filename):
-    state = nnx.state(model, ...)
-    with open(filename, "wb") as f:
-        pickle.dump(state, f)
+    _, state = nnx.split(model)
+    with checkpoint.StandardCheckpointer() as cptr:
+        cptr.save(os.path.abspath(filename), state, force=True)
 
-def load_model(return_model, filename, **kwargs):
-    """Args:
-        return_model: Function or class that returns the model when called with **kwargs
-        filename: File from which to load the model state
-    """
-    abstract_model = nnx.eval_shape(return_model, **kwargs)
-    struct = nnx.graphdef(abstract_model)
-    with open(filename, "rb") as f:
-        state = pickle.load(f)
+def load_model(model_callable, filename, **kwargs):
+    abstract_model = nnx.eval_shape(model_callable, **kwargs)
+    struct, stateref = nnx.split(abstract_model)
+    with checkpoint.StandardCheckpointer() as cptr:
+        state = cptr.restore(os.path.abspath(filename), stateref)
     model = nnx.merge(struct, state)
     return model
 
