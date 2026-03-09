@@ -10,11 +10,11 @@
 
 import os, sys
 sys.path.append(os.path.split(os.path.dirname(os.path.abspath(__file__)))[0])
-import jax, optax, argparse, multiprocessing as mp
-from fedflax import train
+import jax, optax, argparse, multiprocessing as mp, shutil
+from fedflax import train, cast
 from models import ResNet
 from data import fetch_data, seed_worker
-from utils import return_ce, top_5_err, err_fn
+from utils import return_ce, top_5_err, err_fn, load_model
 from jax import numpy as jnp
 from flax import nnx
 from functools import reduce
@@ -62,19 +62,27 @@ if __name__ == "__main__":
         wrt=nnx.Param
     )
 
-    # Get federated models 
-    fl_models, _ = train(model_g, opt, ds_train, return_ce(0.), ds_val, local_epochs="early", 
-                         max_patience=3, val_fn=top_5_err, rounds=1, n_clients=n_clients)
-    
-    # Check LMC
-    err_fn = nnx.jit(nnx.vmap(err_fn))
-    lmc = {}
-    for alpha in tqdm(jnp.linspace(0.,1.,30).tolist(), leave=False):
-        models_agg = partial_aggregate(fl_models, alpha)
-        err:jnp.array = reduce(lambda acc, b: acc + err_fn(models_agg,*b), ds_test, 0.) / len(ds_test)
-        lmc[alpha] = err#.tolist()
-    # Get instability measure inspired by Frankle
-    max_alpha = max(lmc, key=lambda k: lmc[k].mean().item())
-    instability = lmc[max_alpha] - lmc[0.].mean()
-    instability = instability.mean().item()
-    print(f"Mean instability over clients: {instability}, at alpha: {max_alpha}. W-Asymmetry used: {args.wasym}; drift type: {args.drift_type}")
+    # Get federated models at each round
+    train(model_g, opt, ds_train, return_ce(0.), ds_val, local_epochs="early", 
+                         max_patience=3, val_fn=top_5_err, rounds=10, n_clients=n_clients, 
+                         ckpt_fp=f"analysis/checkpoints/imagenet100{'wasym' if args.wasym else 'fedavg'}_{args.drift_type}")
+    # Iterate over rounds to check stability
+    for models_path in os.listdir("analysis/checkpoints/"):
+        _, r, epoch = models_path.split("_")
+        if not epoch==0:
+            shutil.rmtree(os.path.join("analysis/checkpoints/", models_path))
+            continue
+        else:
+            fl_models = load_model(lambda: cast(ResNet(), n_clients), os.path.join("analysis/checkpoints/", models_path))
+        # Check LMC
+        err_fn = nnx.jit(nnx.vmap(err_fn))
+        lmc = {}
+        for alpha in tqdm(jnp.linspace(0.,1.,30).tolist(), leave=False):
+            models_agg = partial_aggregate(fl_models, alpha)
+            err:jnp.array = reduce(lambda acc, b: acc + err_fn(models_agg,*b), ds_test, 0.) / len(ds_test)
+            lmc[alpha] = err#.tolist()
+        # Get instability measure inspired by Frankle
+        max_alpha = max(lmc, key=lambda k: lmc[k].mean().item())
+        instability = lmc[max_alpha] - lmc[0.].mean()
+        instability = instability.mean().item()
+        print(f"Round {r}. Mean instability over clients: {instability}, at alpha: {max_alpha}. W-Asymmetry used: {args.wasym}; drift type: {args.drift_type}")
