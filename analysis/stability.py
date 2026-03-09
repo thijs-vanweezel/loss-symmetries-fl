@@ -46,12 +46,9 @@ if __name__ == "__main__":
         beta = 0.
 
     # Get datasets
-    ds_train = fetch_data(skew, beta=beta, n_clients=n_clients, dataset=1, n_classes=100, num_workers=8,
-                          multiprocessing_context=mp.get_context("spawn"), persistent_workers=True, worker_init_fn=seed_worker)
-    ds_test = fetch_data(skew, partition="test", beta=beta, n_clients=n_clients, dataset=1, n_classes=100, num_workers=4,
-                          multiprocessing_context=mp.get_context("spawn"), persistent_workers=True, worker_init_fn=seed_worker)
-    ds_val = fetch_data(skew, partition="val", beta=beta, n_clients=n_clients, dataset=1, n_classes=100, num_workers=4,
-                          multiprocessing_context=mp.get_context("spawn"), persistent_workers=True, worker_init_fn=seed_worker)
+    ds_train = fetch_data(skew, beta=beta, n_clients=n_clients, dataset=1, n_classes=100)
+    ds_test = fetch_data(skew, partition="test", beta=beta, n_clients=n_clients, dataset=1, n_classes=100)
+    ds_val = fetch_data(skew, partition="val", beta=beta, n_clients=n_clients, dataset=1, n_classes=100)
 
     # Get model
     model_g = ResNet(key=jax.random.key(42), layers=[2,2,2,2], dim_out=100, **asymkwargs)
