@@ -14,7 +14,7 @@ import jax, optax, argparse, multiprocessing as mp
 from fedflax import train
 from models import ResNet
 from data import fetch_data, seed_worker
-from utils import return_ce, top_5_err
+from utils import return_ce, top_5_err, err_fn
 from jax import numpy as jnp
 from flax import nnx
 from functools import reduce
@@ -67,9 +67,7 @@ if __name__ == "__main__":
                          max_patience=3, val_fn=top_5_err, rounds=1, n_clients=n_clients)
     
     # Check LMC
-    err_fn = nnx.jit(nnx.vmap(
-        lambda model, y, x: optax.softmax_cross_entropy_with_integer_labels(model(x, train=True), y, axis=-1).mean()
-    ))
+    err_fn = nnx.jit(nnx.vmap(err_fn))
     lmc = {}
     for alpha in tqdm(jnp.linspace(0.,1.,30).tolist(), leave=False):
         models_agg = partial_aggregate(fl_models, alpha)
