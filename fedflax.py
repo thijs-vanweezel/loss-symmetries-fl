@@ -1,4 +1,4 @@
-import jax, numpy as np, os
+import jax, os, shutil
 from functools import reduce
 from jax import numpy as jnp
 from flax import nnx
@@ -148,5 +148,5 @@ def train(model_g:nnx.Module, opt:nnx.Optimizer, ds_train, ell, ds_val=None, loc
     # Return the final local models, i.e., before aggregation
     if rounds=="early" or local_epochs=="early":
         models = load_model(lambda: models, ckpt_fp+ext)
-        os.remove(ckpt_fp+ext)
+        shutil.rmtree(ckpt_fp+ext)
     return models, r-patience-1
