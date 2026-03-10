@@ -61,14 +61,15 @@ if __name__ == "__main__":
     )
 
     # Get federated models at each round
+    ckpt_fp = f"analysis/checkpoints/imagenet100{'wasym' if args.wasym else 'fedavg'}_{args.drift_type}"
     train(model_g, opt, ds_train, return_ce(0.), ds_val, local_epochs="early", 
                          max_patience=3, val_fn=top_5_err, rounds=10, n_clients=n_clients, 
-                         ckpt_fp=f"analysis/checkpoints/imagenet100{'wasym' if args.wasym else 'fedavg'}_{args.drift_type}")
+                         ckpt_fp=ckpt_fp)
     
     # Iterate over rounds to check stability
     log = defaultdict(lambda: defaultdict(dict))
-    for models_path in os.listdir("analysis/checkpoints/"):
-        _, r, epoch = models_path.split("_")
+    for models_path in filter(lambda fp: fp.startswith(ckpt_fp), os.listdir("analysis/checkpoints/")):
+        *_, r, epoch = models_path.split("_")
         if not epoch==0:
             shutil.rmtree(os.path.join("analysis/checkpoints/", models_path))
             continue
