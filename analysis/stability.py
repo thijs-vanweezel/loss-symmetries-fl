@@ -19,7 +19,6 @@ from jax import numpy as jnp
 from flax import nnx
 from functools import reduce
 from tqdm.auto import tqdm
-from collections import defaultdict
 
 def partial_aggregate(models, alpha):
     struct, params, rest = nnx.split(models, (nnx.Param, nnx.BatchStat), ...)
@@ -67,7 +66,7 @@ if __name__ == "__main__":
                          ckpt_fp=ckpt_fp)
     
     # Iterate over rounds to check stability
-    log = defaultdict(lambda: defaultdict(dict))
+    log = dict
     for models_path in filter(lambda fp: fp.startswith(os.path.split(ckpt_fp)[-1]), os.listdir("analysis/checkpoints/")):
         *_, r, epoch = models_path.split("_")
         if not epoch=="0":
@@ -87,5 +86,5 @@ if __name__ == "__main__":
         instability = lmc[max_alpha] - lmc[0.].mean()
         instability = instability.mean().item()
         # Log results
-        log[args.drift_type]["wasym" if args.wasym else "fedavg"][r] = instability
-        json.dump(log, open("analysis/stability_log.json", "w"))
+        log[r] = instability
+        json.dump(log, open(f"analysis/stability_{'wasym' if args.wasym else 'fedavg'}_{args.drift_type}.json", "w"))
