@@ -73,8 +73,14 @@ def plot_trajectory(errs, pca, fps, alpha_grid, beta_grid, filename, labels=True
         zorder=0
     )
     if labels:
-        bar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=plot.cmap), ax=ax, shrink=0.8, ticks=None)
+        bar = fig.colorbar(plt.cm.ScalarMappable(norm=plot.norm, cmap=plot.cmap), ax=ax, shrink=0.8, ticks=None)
         bar.set_label("Error")
+        ticks = np.exp(np.linspace(np.log(errs.min()), np.log(errs.max()), 5))
+        bar.set_ticks(
+            ticks=ticks, 
+            labels=[f"{t:.0f}°" for t in ticks]
+        )
+        bar.ax.minorticks_off()
     # Plot the model paths (assume params are sorted by optimization step)
     prev_coords = None
     r = 0
@@ -95,15 +101,15 @@ def plot_trajectory(errs, pca, fps, alpha_grid, beta_grid, filename, labels=True
         aggregate = jnp.allclose(coords[0], coords[1])
         if aggregate:
             ax.annotate(r, xy=coords[0]+.07, c="w", fontsize=10)
-            r += 1; lw = 1; size = 10; colors = "black"
+            r += 1; lw = 1; size = 10; colors = "grey"
         else: 
             lw = 0; size = 7
             colors = [f"C{c+1}" for c in range(coords.shape[0])]
-        ax.scatter(coords[:,0], coords[:,1], c=colors, s=size, linewidths=lw, edgecolors="k", zorder=2)
+        ax.scatter(coords[:,0], coords[:,1], c=colors, s=size, linewidths=lw, edgecolors="grey", zorder=2)
         prev_coords = coords
     # Display accuracy of final aggregated model
     coords_discrete = jnp.argmin(jnp.abs(alpha_grid - coords[0,0])), jnp.argmin(jnp.abs(beta_grid - coords[0,1]))
-    ax.annotate(f"{int(errs[coords_discrete])}°", xy=coords_discrete, c="k", fontsize=25)
+    ax.annotate(f"{int(errs[coords_discrete])}°", xy=coords_discrete, c="grey", fontsize=25)
     # Show
     if labels:
         handles, labels = ax.get_legend_handles_labels()
