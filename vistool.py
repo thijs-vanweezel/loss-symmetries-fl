@@ -91,25 +91,27 @@ def plot_trajectory(errs, pca, fps, alpha_grid, beta_grid, filename, labels=True
         params = jax.tree.reduce(lambda acc, p: jnp.concatenate([acc, p.reshape(p.shape[0],-1)], axis=1), params, jnp.empty((n_clients,0)))
         coords = pca.transform(params) - 1.
         # Plot as line
+        aggregate = jnp.allclose(coords[0], coords[1])
         if prev_coords is not None:
             ax.add_collection(mpl.collections.LineCollection(
                 zip(prev_coords, coords), 
                 colors=[f"C{c+1}" for c in range(coords.shape[0])],
-                zorder=1
+                zorder=1,
+                linestyle="--" if aggregate else "-",
+                lw=1. if aggregate else 2,
+                alpha=0.8 if aggregate else 1.0
             ))
         # Plot points
-        aggregate = jnp.allclose(coords[0], coords[1])
         if aggregate:
             ax.annotate(r, xy=coords[0]+.07, c="w", fontsize=10)
-            r += 1; lw = 1; size = 10; colors = "grey"
+            r += 1; colors = "grey"; size=20
         else: 
-            lw = 0; size = 7
-            colors = [f"C{c+1}" for c in range(coords.shape[0])]
-        ax.scatter(coords[:,0], coords[:,1], c=colors, s=size, linewidths=lw, edgecolors="grey", zorder=2)
+            colors = [f"C{c+1}" for c in range(coords.shape[0])]; size=15
+        ax.scatter(coords[:,0], coords[:,1], c=colors, s=size, linewidths=0., edgecolors="grey", zorder=2)
         prev_coords = coords
     # Display accuracy of final aggregated model
     coords_discrete = jnp.argmin(jnp.abs(alpha_grid - coords[0,0])), jnp.argmin(jnp.abs(beta_grid - coords[0,1]))
-    ax.annotate(f"{int(errs[coords_discrete])}°", xy=coords_discrete, c="grey", fontsize=25)
+    ax.annotate(f"{int(errs[coords_discrete])}°", xy=coords_discrete, c="grey", fontsize=30)
     # Show
     if labels:
         handles, labels = ax.get_legend_handles_labels()
