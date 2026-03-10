@@ -4,7 +4,7 @@ from flax import nnx
 from functools import reduce
 from matplotlib import pyplot as plt
 from utils import load_model
-from models import LeNet
+from tqdm.auto import tqdm
 plt.style.use("seaborn-v0_8-pastel")
 plt.rcParams.update({
     "text.usetex": True,
@@ -37,6 +37,7 @@ def get_reconstruct(model, client_dim=True):
 def compute_surface(alpha_grid, beta_grid, pca, reconstruct, ds, val_fn, interpolate=True):
     val_fn = nnx.jit(nnx.vmap(val_fn, in_axes=(None,0,0,0)))
     errs = jnp.zeros((len(alpha_grid), len(beta_grid)))
+    bar = tqdm(total=len(alpha_grid)*len(beta_grid), desc="Computing surface")
     for i, alpha_ in enumerate(alpha_grid):
         for j, beta_ in enumerate(beta_grid):
             # Reconstruct the model for some point in the 2d plane
@@ -45,7 +46,8 @@ def compute_surface(alpha_grid, beta_grid, pca, reconstruct, ds, val_fn, interpo
             # Compute accuracy
             score = reduce(lambda score, b: score + val_fn(model,*b), ds, 0.) / len(ds)
             errs = errs.at[i,j].set(score.mean()) # mean over clients' data, i.e., global data error rate
-    
+            bar.update(1)
+    bar.close()
     if interpolate:
         alpha_grid_fine = np.linspace(alpha_grid.min(), alpha_grid.max(), 1000)
         beta_grid_fine = np.linspace(beta_grid.min(), beta_grid.max(), 1000)
