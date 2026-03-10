@@ -1,9 +1,9 @@
-import jax, scipy, numpy as np, matplotlib as mpl, pickle
+import jax, scipy, numpy as np, matplotlib as mpl, os
 from jax import numpy as jnp
 from flax import nnx
 from functools import reduce
 from matplotlib import pyplot as plt
-from utils import load_model
+from orbax import checkpoint
 from tqdm.auto import tqdm
 plt.style.use("seaborn-v0_8-pastel")
 plt.rcParams.update({
@@ -80,7 +80,8 @@ def plot_trajectory(errs, pca, fps, alpha_grid, beta_grid, filename, labels=True
     r = 0
     for fp in fps:
         # Flatten parameters
-        params = pickle.load(open(fp, "rb"))
+        with checkpoint.StandardCheckpointer() as cptr:
+            params = cptr.restore(os.path.abspath(fp))
         params = jax.tree.reduce(lambda acc, p: jnp.concatenate([acc, p.reshape(p.shape[0],-1)], axis=1), params, jnp.empty((n_clients,0)))
         coords = pca.transform(params) - 1.
         # Plot as line
