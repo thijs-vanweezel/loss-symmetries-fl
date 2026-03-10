@@ -68,9 +68,9 @@ if __name__ == "__main__":
     
     # Iterate over rounds to check stability
     log = defaultdict(lambda: defaultdict(dict))
-    for models_path in filter(lambda fp: fp.startswith(ckpt_fp), os.listdir("analysis/checkpoints/")):
+    for models_path in filter(lambda fp: fp.startswith(os.path.split(ckpt_fp)[-1]), os.listdir("analysis/checkpoints/")):
         *_, r, epoch = models_path.split("_")
-        if not epoch==0:
+        if not epoch=="0":
             shutil.rmtree(os.path.join("analysis/checkpoints/", models_path))
             continue
         else:
