@@ -66,14 +66,17 @@ if __name__ == "__main__":
                          ckpt_fp=ckpt_fp)
     
     # Iterate over rounds to check stability
-    log = dict
+    log = {}
     for models_path in filter(lambda fp: fp.startswith(os.path.split(ckpt_fp)[-1]), os.listdir("analysis/checkpoints/")):
         *_, r, epoch = models_path.split("_")
         if not epoch=="0":
             shutil.rmtree(os.path.join("analysis/checkpoints/", models_path))
             continue
         else:
-            fl_models = load_model(lambda: cast(ResNet(), n_clients), os.path.join("analysis/checkpoints/", models_path))
+            fl_models = load_model(
+                lambda: cast(ResNet(layers=[2,2,2,2], dim_out=100), n_clients), 
+                os.path.join("analysis/checkpoints/", models_path)
+            )
         # Check LMC
         err_fn = nnx.jit(nnx.vmap(err_fn))
         lmc:dict[float, jax.Array] = {}
