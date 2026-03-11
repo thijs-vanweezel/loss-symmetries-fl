@@ -14,7 +14,7 @@ import jax, optax, argparse, shutil, json
 from fedflax import train, cast
 from models import ResNet
 from data import fetch_data, seed_worker
-from utils import return_ce, top_5_err, err_fn, load_model
+from utils import return_ce, top_5_err, err_fn as _err_fn, load_model
 from jax import numpy as jnp
 from flax import nnx
 from functools import reduce
@@ -78,7 +78,7 @@ if __name__ == "__main__":
                 os.path.join("analysis/checkpoints/", models_path)
             )
         # Check LMC
-        err_fn = nnx.jit(nnx.vmap(err_fn))
+        err_fn = nnx.jit(nnx.vmap(_err_fn))
         lmc:dict[float, jax.Array] = {}
         for alpha in tqdm(jnp.linspace(0.,1.,30).tolist(), leave=False):
             models_agg = partial_aggregate(fl_models, alpha)
