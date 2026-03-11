@@ -48,10 +48,9 @@ if __name__ == "__main__":
 
     # Initialize model and optimizer
     model_init = ResNet(jax.random.key(42), dim_out=n_classes, layers=layers, **asymkwargs)
-    lr = optax.warmup_exponential_decay_schedule(1e-6, 3e-3, 1000, 2000, 0.9, end_value=1e-5)
     opt = nnx.Optimizer(
         model_init,
-        optax.adam(lr),
+        optax.adam(1e-3),
         wrt=nnx.Param
     )
 
