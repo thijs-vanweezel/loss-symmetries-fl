@@ -49,7 +49,7 @@ if __name__ == "__main__":
     elif args.asymtype == "syre":
         asymkwargs["sigma"] = 1e-4
         ell = lambda m, mg, y, x: optax.sigmoid_binary_cross_entropy(m(x, train=True), y).mean() \
-            + 1e-4*nnx_norm(nnx.state(m, nnx.Param), n_clients=n_clients).mean()
+            + 1e-4*nnx_norm(nnx.state(m, nnx.Param))
     elif args.asymtype == "normweights":
         asymkwargs["normweights"] = True
     elif args.asymtype == "dimexp":
