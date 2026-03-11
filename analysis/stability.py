@@ -67,16 +67,18 @@ if __name__ == "__main__":
     
     # Iterate over rounds to check stability
     log = {}
-    for models_path in filter(lambda fp: fp.startswith(os.path.split(ckpt_fp)[-1]), os.listdir("analysis/checkpoints/")):
-        *_, r, epoch = models_path.split("_")
-        if not epoch=="0":
-            shutil.rmtree(os.path.join("analysis/checkpoints/", models_path))
+    paths = os.listdir("analysis/checkpoints/")
+    paths = filter(lambda fp: fp.startswith(os.path.split(ckpt_fp)[-1]), paths)
+    paths = map(lambda s: (
+        int(s.split("_")[-2]), int(s.split("_")[-1].split(".")[0]), os.path.join("analysis/checkpoints/", s)
+    ), paths)
+    paths = sorted(paths)
+    for i, (r, epoch, models_path) in enumerate(paths):
+        if not epoch>paths[i+1][1]:
+            shutil.rmtree(models_path)
             continue
         else:
-            fl_models = load_model(
-                lambda: cast(ResNet(layers=[2,2,2,2], dim_out=100), n_clients), 
-                os.path.join("analysis/checkpoints/", models_path)
-            )
+            fl_models = load_model(lambda: cast(ResNet(layers=[2,2,2,2], dim_out=100), n_clients), models_path)
         # Check LMC
         err_fn = nnx.jit(nnx.vmap(_err_fn))
         lmc:dict[float, jax.Array] = {}
