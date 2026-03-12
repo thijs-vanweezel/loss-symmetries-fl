@@ -74,7 +74,7 @@ if __name__ == "__main__":
     ), paths)
     paths = sorted(paths)
     for i, (r, epoch, models_path) in enumerate(paths):
-        if not epoch>paths[i+1][1]:
+        if (i!=len(paths)-1) and (not epoch>paths[i+1][1]) and (r==paths[i-1][0]) and (os.path.split(ckpt_fp)[-1] in models_path):
             shutil.rmtree(models_path)
             continue
         else:
@@ -88,7 +88,7 @@ if __name__ == "__main__":
             lmc[alpha] = err
         # Get instability measure inspired by Frankle
         max_alpha = max(lmc, key=lambda k: lmc[k].mean().item())
-        instability = lmc[max_alpha] - lmc[0.].mean()
+        instability = lmc[max_alpha] - lmc[0.]
         instability = instability.mean().item()
         # Log results
         log[r] = instability
