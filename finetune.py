@@ -69,10 +69,10 @@ if __name__ == "__main__":
     )
 
     # CelebA data
-    ds_train = fetch_data(beta=1., dataset=3, n_clients=n_clients, skew="feature", batch_size=64,
+    ds_train = fetch_data(beta=1., dataset=3, n_clients=n_clients, skew="feature", batch_size=64, persistent_workers=True,
                           num_workers=6, multiprocessing_context=mp.get_context("spawn"), worker_init_fn=seed_worker)
     ds_val = fetch_data(beta=1., dataset=3, partition="val", n_clients=n_clients, skew="feature", batch_size=64,
-                        num_workers=2, multiprocessing_context=mp.get_context("spawn"))
+                        num_workers=4, multiprocessing_context=mp.get_context("spawn"), persistent_workers=True)
 
     # Train
     err_fn = lambda m, y, x: 1-jnp.mean(round(nnx.sigmoid(m(x, train=False)))==y)
@@ -97,7 +97,7 @@ if __name__ == "__main__":
     # Load test data
     del ds_train, ds_val
     ds_test = fetch_data(beta=1., dataset=3, partition="test", n_clients=n_clients, skew="feature",
-                         num_workers=4, multiprocessing_context=mp.get_context("spawn"))
+                         num_workers=2, multiprocessing_context=mp.get_context("spawn"))
 
     # Evaluate local
     vtest_fn = nnx.jit(nnx.vmap(err_fn, in_axes=(0,0,0)))
