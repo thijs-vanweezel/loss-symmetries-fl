@@ -31,14 +31,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Analyze stability of a ResNet trained on ImageNet in a federated setting")
     parser.add_argument("--n_clients", type=int, default=4, help="Number of clients to simulate")
     parser.add_argument("--wasym", action=argparse.BooleanOptionalAction, default=False, help="Whether to use W-Asymmetry or not")
-    parser.add_argument("--drift-type", type=str, default="heterogeneous", choices=["heterogeneous", "homogeneous"], help="Type of client drift to induce")
+    parser.add_argument("--heterogeneous", action=argparse.BooleanOptionalAction, default=False, help="Type of client drift to induce")
     args = parser.parse_args()
     n_clients = args.n_clients
     # Fill kwargs
     asymkwargs = {}
     asymkwargs["wasym"] = args.wasym
     asymkwargs["kappa"] = 1
-    if args.drift_type == "heterogeneous":
+    if args.heterogeneous:
         skew = "label"
         beta = 1.
     else:
@@ -60,7 +60,7 @@ if __name__ == "__main__":
     )
 
     # Get federated models at each round
-    ckpt_fp = f"analysis/checkpoints/imagenet100{'wasym' if args.wasym else 'fedavg'}_{args.drift_type}"
+    ckpt_fp = f"analysis/checkpoints/imagenet100{'wasym' if args.wasym else 'fedavg'}_{'heterogeneous' if args.heterogeneous else 'homogeneous'}"
     train(model_g, opt, ds_train, return_ce(0.), ds_val, local_epochs="early", 
                          max_patience=3, val_fn=top_5_err, rounds=10, n_clients=n_clients, 
                          ckpt_fp=ckpt_fp)
@@ -74,10 +74,11 @@ if __name__ == "__main__":
     ), paths)
     paths = sorted(paths)
     for i, (r, epoch, models_path) in enumerate(paths):
-        if (i!=len(paths)-1) and (not epoch>paths[i+1][1]) and (r==paths[i-1][0]) and (os.path.split(ckpt_fp)[-1] in models_path):
+        if (i!=len(paths)-1) and (not epoch>paths[i+1][1]) and (epoch==0 or r==paths[i-1][0]) and (os.path.split(ckpt_fp)[-1] in models_path):
             shutil.rmtree(models_path)
             continue
         else:
+            print(f"Checking round {r} at epoch {epoch}...")
             fl_models = load_model(lambda: cast(ResNet(layers=[2,2,2,2], dim_out=100), n_clients), models_path)
         # Check LMC
         err_fn = nnx.jit(nnx.vmap(_err_fn))
@@ -92,4 +93,4 @@ if __name__ == "__main__":
         instability = instability.mean().item()
         # Log results
         log[r] = instability
-        json.dump(log, open(f"analysis/stability_{'wasym' if args.wasym else 'fedavg'}_{args.drift_type}.json", "w"))
+        json.dump(log, open(f"analysis/stability_{'wasym' if args.wasym else 'fedavg'}_{'heterogeneous' if args.heterogeneous else 'homogeneous'}.json", "w"))
