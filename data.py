@@ -265,7 +265,7 @@ class CelebA(Dataset):
             # Deterministic train/val/test split which likely retains each person in each partition
             if ["train", "val", "test"][(tr:=(i%20-14)//14+1)+(tr*i%2)]!=partition: continue
             # One-hot encoded label
-            label = torch.tensor([(int(attrib)+1)//2 for attrib in attribs])
+            label = [(int(attrib)+1)//2 for attrib in attribs]
             self.files[client].append((os.path.join(path, "images", filename), label))
         self.prev_idx = float("inf")
         
@@ -289,6 +289,7 @@ class CelebA(Dataset):
         i = idx // len(self.files)
         # Load
         impath, label = self.files[client][i]
+        label = torch.tensor(label)
         with open(impath, "rb") as f:
             bytesdata = torch.frombuffer(f.read(), dtype=torch.uint8)
         img = torchvision.io.decode_image(bytesdata, mode="RGB").float() / 255.
