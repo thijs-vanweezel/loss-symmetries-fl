@@ -163,8 +163,8 @@ class AsymBatchNorm(nnx.BatchNorm):
         self.normweights = normweights
     def __call__(self, x, use_running_average=None, norm_prev=None):
         if norm_prev is not None:
-            self.mean.value /= norm_prev
-            self.var.value /= norm_prev**2
+            self.mean.value *= norm_prev
+            self.var.value *= norm_prev**2
         if self.normweights:
             norm = self.scale.value
             if self.use_scale: self.scale.value /= norm
