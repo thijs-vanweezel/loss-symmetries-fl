@@ -143,7 +143,7 @@ def train(model_g:nnx.Module, opt:nnx.Optimizer, ds_train, ell, ds_val=None, loc
         r += 1
     
     # Save final params
-    if ckpt: save_model(cast(model_g, n_clients), f"{ckpt_fp}_{r}_{epoch}{ext}")
+    if ckpt: save_model(cast(model_g, n_clients), f"{ckpt_fp}_{r}_0{ext}")
 
     # Return the final local models, i.e., before aggregation
     if rounds=="early" or local_epochs=="early":
