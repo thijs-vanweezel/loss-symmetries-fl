@@ -2,7 +2,7 @@ import os, sys
 sys.path.append(os.path.split(os.path.dirname(os.path.abspath(__file__)))[0])
 os.environ["XLA_FLAGS"] = " --xla_gpu_strict_conv_algorithm_picker=false"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-import jax, optax, argparse
+import jax, optax, argparse, jax.experimental
 from orbax import checkpoint
 from jax import numpy as jnp
 from flax import nnx
@@ -42,10 +42,11 @@ elif args.dataset == "oxford":
         miou_err = 1. - miou(jax.nn.softmax(logits, axis=-1), y)
         return ce + miou_err
 elif args.dataset == "imagenet":
-    kwargs["layers"] = [3,4,6,3]
+    kwargs["layers"] = [3,4,6,3] if args.n_classes>100 else [2,2,2,2]
+    kwargs["dim_out"] = args.n_classes
     model_name = f"/data/bucket/traincombmodels/models/imagenet{args.n_classes}_{args.asymtype or ('central' if n_clients==1 else 'base')}"
     modelclass = ResNet
-    dataloader = fetch_data(skew="label", partition="test", n_clients=1, beta=1., dataset=1, batch_size=64)
+    dataloader = fetch_data(skew="label", partition="test", n_clients=1, beta=1., dataset=1, batch_size=64, n_classes=args.n_classes)
     _loss_fn = lambda m, y, x: optax.softmax_cross_entropy_with_integer_labels(m(x, train=False), y).mean()
 
 # Asymmetry parameters
@@ -70,10 +71,18 @@ with checkpoint.StandardCheckpointer() as cptr:
 state = jax.tree.map(lambda p: p if not (hasattr(p, "dtype") and jnp.issubdtype(p.dtype, jnp.floating)) else jnp.astype(p, jnp.float32), state)
 models = nnx.merge(struct, state)
 
+# Convert dataloader to a jax stack
+ys, xs = [], []
+for y, x in dataloader:
+    ys.append(y)
+    xs.append(x)
+xs = jnp.stack(xs, axis=0)
+ys = jnp.stack(ys, axis=0)
+
 # Calculate the dominant eigenvalue (lambda_max) of an nnx model using the power iteration method
 # Note that each iteration only considers one batch
-@nnx.vmap(in_axes=(0,None,None,None))
-def lambda_max(model, dataloader, key, max_iter=100):
+@nnx.vmap(in_axes=(0,None,None))
+def lambda_max(model, key, max_iter):
     # Convenience (jvp must act on a parameter-only pytree)
     struct, theta, rest = nnx.split(model, nnx.Param, ...)
     reconstruct = lambda th: nnx.merge(struct, th, rest)
@@ -87,9 +96,13 @@ def lambda_max(model, dataloader, key, max_iter=100):
 
     # Perform iteration avoiding python bools
     def true_fun(val):
-        # Power iteration step
-        hv_prev, *_, y, x, i = val
+        # Unpack
+        hv_prev, *_, i = val
+        # Get batch
+        y, x = ys[i%len(ys)], xs[i%len(xs)]
+        # Fix data
         grad_fn = partial(_grad_fn, x=x.squeeze(0), y=y.squeeze(0))
+        # Power iteration step
         norm = nnx_norm(hv_prev)
         v = jax.tree.map(lambda hv_: hv_ / norm, hv_prev)
         hv = jax.jvp(
@@ -97,14 +110,14 @@ def lambda_max(model, dataloader, key, max_iter=100):
             (theta,),
             (v,)
         )[1]
-        return hv, hv_prev, v, *next(dataloader), i+1
+        return hv, hv_prev, v, i+1
     def cond_fun(val):
         # Check convergence
-        hv, hv_prev, *_, i = val
+        hv, hv_prev, _, i = val
         return jnp.logical_or(i<2, jnp.logical_and(i<max_iter, nnx_norm(hv, hv_prev)>=1e-3))
     # Iterate
     i0 = jnp.array(0)
-    hv, _, v, *_ = jax.lax.while_loop(cond_fun, true_fun, (rand, rand, rand, *next(dataloader), i0))
+    hv, _, v, _ = jax.lax.while_loop(cond_fun, true_fun, (rand, rand, rand, i0))
     # Return Rayleigh quotient (manual dot product between hv and v)
     return jax.tree.reduce(
         lambda acc, prod: acc+prod, 
@@ -113,5 +126,5 @@ def lambda_max(model, dataloader, key, max_iter=100):
 
 # Run
 key = jax.random.key(42)
-hessian = lambda_max(models, iter(tqdm(dataloader)), key)
+hessian = lambda_max(models, key, 100)
 print(f"Dominant eigenvalue of Hessian matrix for {args.dataset} with asymmetry {args.asymtype}: ", hessian)
