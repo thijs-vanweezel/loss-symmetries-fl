@@ -16,20 +16,24 @@ from fedflax import cast
 from functools import partial
 
 parser = argparse.ArgumentParser(
-    description="Load model and dataset, and calculate the dominant eigenvalue of the Hessian of the loss using power iteration. Assumes four clients."
+    description="Load model and dataset, and calculate the dominant eigenvalue of the Hessian of the loss using power iteration."
 )
 parser.add_argument("--dataset", type=str, default="celeba", choices=["celeba", "oxford", "imagenet"], help="Dataset to evaluate on. Also determines the model to load.")
 parser.add_argument("--asymtype", type=str, default="", choices=["", "wasym", "syre", "normweights", "dimexp"], help="Type of symmetry elimination to use")
+parser.add_argument("--n_clients", type=int, default=4, help="Number of clients to simulate (only relevant for oxford)")
+parser.add_argument("--n_classes", type=int, default=1000, help="Number of classes to use from ImageNet (only relevant for imagenet)")
 args = parser.parse_args()
 
 # Setup model, dataset, and loss
 kwargs = {"key":jax.random.key(0)}
-n_clients = 4
+n_clients = args.n_clients
 if args.dataset == "celeba":
+    model_name = f"/data/bucket/traincombmodels/models/celeba_{args.asymtype or ('central' if n_clients==1 else 'base')}"
     modelclass = Classifier
     dataloader = fetch_data(skew="feature", partition="test", n_clients=1, beta=1., dataset=3, batch_size=64)
     _loss_fn = lambda m, y, x: optax.sigmoid_binary_cross_entropy(m(x, train=False), y).mean()
 elif args.dataset == "oxford":
+    model_name = f"/data/bucket/traincombmodels/models/oxford_{args.asymtype or ('central' if n_clients==1 else 'base')}_{args.n_clients}clients"
     modelclass = UNETR
     dataloader = fetch_data(skew="feature", partition="test", n_clients=1, beta=1., dataset=2, batch_size=64)
     def _loss_fn(model, y, x):
@@ -39,6 +43,7 @@ elif args.dataset == "oxford":
         return ce + miou_err
 elif args.dataset == "imagenet":
     kwargs["layers"] = [3,4,6,3]
+    model_name = f"/data/bucket/traincombmodels/models/imagenet{args.n_classes}_{args.asymtype or ('central' if n_clients==1 else 'base')}"
     modelclass = ResNet
     dataloader = fetch_data(skew="label", partition="test", n_clients=1, beta=1., dataset=1, batch_size=64)
     _loss_fn = lambda m, y, x: optax.softmax_cross_entropy_with_integer_labels(m(x, train=False), y).mean()
@@ -58,7 +63,6 @@ elif args.asymtype == "dimexp":
     kwargs["dimexp"] = 1
 
 # Load model
-model_name = f"/data/bucket/traincombmodels/models/{args.dataset}_{args.asymtype or 'base'}"
 abstract_model = nnx.eval_shape(lambda: cast(modelclass(**kwargs), n_clients))
 struct, stateref = nnx.split(abstract_model)
 with checkpoint.StandardCheckpointer() as cptr:
