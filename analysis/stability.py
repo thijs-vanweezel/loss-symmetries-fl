@@ -61,9 +61,8 @@ if __name__ == "__main__":
 
     # Get federated models at each round
     ckpt_fp = f"analysis/checkpoints/imagenet100{'wasym' if args.wasym else 'fedavg'}_{'heterogeneous' if args.heterogeneous else 'homogeneous'}"
-    train(model_g, opt, ds_train, return_ce(0.), ds_val, local_epochs="early", 
-                         max_patience=3, val_fn=top_5_err, rounds=10, n_clients=n_clients, 
-                         ckpt_fp=ckpt_fp)
+    train(model_g, opt, ds_train, return_ce(0.), ds_val, local_epochs=15, 
+          max_patience=3, val_fn=top_5_err, rounds=10, n_clients=n_clients, ckpt_fp=ckpt_fp)
     
     # Iterate over rounds to check stability
     log = {}
@@ -79,7 +78,7 @@ if __name__ == "__main__":
             continue
         else:
             print(f"Checking round {r} at epoch {epoch}...")
-            fl_models = load_model(lambda: cast(ResNet(layers=[2,2,2,2], dim_out=100), n_clients), models_path)
+            fl_models = load_model(lambda: cast(ResNet(layers=[2,2,2,2], dim_out=100, **asymkwargs), n_clients), models_path)
         # Check LMC
         err_fn = nnx.jit(nnx.vmap(_err_fn))
         lmc:dict[float, jax.Array] = {}
