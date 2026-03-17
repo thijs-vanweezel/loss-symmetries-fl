@@ -3,7 +3,7 @@ from functools import reduce
 from jax import numpy as jnp
 from flax import nnx
 from tqdm.auto import tqdm
-from utils import save_model, load_model
+from .utils import save_model, load_model
 
 def return_train_step(ell, n_inputs):
     # Parallelize loss (returns grad for each client)
@@ -59,7 +59,7 @@ def train(model_g:nnx.Module, opt:nnx.Optimizer, ds_train, ell, ds_val=None, loc
     Returns:
         The final local models before aggregation and the number of rounds it took to converge. To aggregate;
         ```
-        from fedflax import train, get_updates, aggregate
+        from backend.fedflax import train, get_updates, aggregate
         model_init = ... # initialize global model
         models, _rounds = train(model_init, ...) # train with desired arguments
         updates = get_updates(model_init, models)

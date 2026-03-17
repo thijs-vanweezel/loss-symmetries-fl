@@ -1,13 +1,20 @@
 # Imports
-import os
+import os, sys
+from pathlib import Path
 os.environ["XLA_FLAGS"] = " --xla_gpu_strict_conv_algorithm_picker=false"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-import jax, optax, os, multiprocessing as mp, argparse
-from fedflax import train, get_updates, aggregate
-from unetr import UNETR
-from data import fetch_data, seed_worker
+
+# Allow direct script execution from this subfolder while using package imports.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import jax, optax, multiprocessing as mp, argparse
+from backend.fedflax import train, get_updates, aggregate
+from backend.unetr import UNETR
+from backend.data import fetch_data, seed_worker
 from orbax import checkpoint
-from utils import miou, nnx_norm
+from backend.utils import miou, nnx_norm
 from jax import numpy as jnp
 from flax import nnx
 from functools import reduce

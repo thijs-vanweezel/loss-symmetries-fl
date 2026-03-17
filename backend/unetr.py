@@ -3,7 +3,7 @@ import jax
 from jax import numpy as jnp
 from flax import nnx
 from typing import Callable
-from models import AsymConv, AsymLinear, interleave
+from .models import AsymConv, AsymLinear, interleave
 from functools import partial
 
 @partial(jax.vmap, in_axes=(0,None))

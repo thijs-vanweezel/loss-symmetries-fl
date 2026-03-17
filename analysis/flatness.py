@@ -1,18 +1,24 @@
 import os, sys
-sys.path.append(os.path.split(os.path.dirname(os.path.abspath(__file__)))[0])
+from pathlib import Path
 os.environ["XLA_FLAGS"] = " --xla_gpu_strict_conv_algorithm_picker=false"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+
+# Allow direct script execution from this subfolder while using package imports.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 import jax, optax, argparse, jax.experimental
 from orbax import checkpoint
 from jax import numpy as jnp
 from flax import nnx
-from utils import nnx_norm, miou
-from data import fetch_data
-from models import ResNet
-from unetr import UNETR
-from finetune import Classifier
+from backend.utils import nnx_norm, miou
+from backend.data import fetch_data
+from backend.models import ResNet
+from backend.unetr import UNETR
+from methodology.finetune import Classifier
 from tqdm.auto import tqdm
-from fedflax import cast
+from backend.fedflax import cast
 from functools import partial
 
 parser = argparse.ArgumentParser(

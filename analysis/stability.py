@@ -9,12 +9,19 @@
 # 4d. FedAvg does not exhibit high barrier, but W-Asymmetry does. This will not happen.
 
 import os, sys
-sys.path.append(os.path.split(os.path.dirname(os.path.abspath(__file__)))[0])
+from pathlib import Path
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+
+# Allow direct script execution from this subfolder while using package imports.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 import jax, optax, argparse, shutil, json
-from fedflax import train, cast
-from models import ResNet
-from data import fetch_data, seed_worker
-from utils import return_ce, top_5_err, err_fn as _err_fn, load_model
+from backend.fedflax import train, cast
+from backend.models import ResNet
+from backend.data import fetch_data, seed_worker
+from backend.utils import return_ce, top_5_err, err_fn as _err_fn, load_model
 from jax import numpy as jnp
 from flax import nnx
 from functools import reduce
