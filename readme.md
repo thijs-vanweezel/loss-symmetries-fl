@@ -9,6 +9,7 @@ This repository follows the general structure of the paper. The folder `backend`
 - `utils.py`: contains various loss functions and performance metrics, as well as convenience functions for loading and saving nnx models.
 - `models.py`: models can be imported from here.
 - `data.py`: paramountly contains the `fetch_data` function, which returns a specified dataset, accounting for parameters such as heterogeneity type and severity.
+
 Moreover, the preliminary experiments of Section 3 are contained in the folder `preliminary`. The evaluation scripts of the methodology of Section 4 can be found in the folder `methodology`. Lastly, Section 5, analysis, corresponds to the folder `analysis`. For the FedMA adaptation, please see https://github.com/thijs-vanweezel/FedMA.
 
 ## Dependencies
@@ -19,6 +20,7 @@ The stable versions of the essential packages are:
 - jax 0.8.1.dev20260317
 - optax 0.2.6
 - flax 0.12.1
+
 For the finetuning script, additionally install ml-collections and https://github.com/google-research/vision_transformer.
 For `vissurfacedrift.ipynb` and `levelset.ipynb`, additionally install scikit-learn.
 For the disentanglement script, additionally install npy-append-array.
