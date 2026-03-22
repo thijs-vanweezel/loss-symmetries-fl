@@ -68,7 +68,7 @@ if __name__ == "__main__":
 
     # Get federated models at each round
     ckpt_fp = f"analysis/checkpoints/imagenet100{'wasym' if args.wasym else 'fedavg'}_{'heterogeneous' if args.heterogeneous else 'homogeneous'}"
-    train(model_g, opt, ds_train, return_ce(0.), ds_val, local_epochs=15, 
+    train(model_g, opt, ds_train, return_ce(0.), ds_val, local_epochs=30, 
           max_patience=3, val_fn=top_5_err, rounds=10, n_clients=n_clients, ckpt_fp=ckpt_fp)
     
     # Iterate over rounds to check stability
