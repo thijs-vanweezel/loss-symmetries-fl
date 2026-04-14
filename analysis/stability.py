@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import jax, optax, argparse, shutil, json
+import jax, optax, argparse, shutil, json, multiprocessing as mp
 from backend.fedflax import train, cast
 from backend.models import ResNet
 from backend.data import fetch_data, seed_worker
@@ -54,9 +54,12 @@ if __name__ == "__main__":
         beta = 0.
 
     # Get datasets
-    ds_train = fetch_data(skew, beta=beta, n_clients=n_clients, dataset=1, n_classes=100)
-    ds_test = fetch_data(skew, partition="test", beta=beta, n_clients=n_clients, dataset=1, n_classes=100)
-    ds_val = fetch_data(skew, partition="val", beta=beta, n_clients=n_clients, dataset=1, n_classes=100)
+    ds_train = fetch_data(skew, beta=beta, n_clients=n_clients, dataset=1, n_classes=100, num_workers=8,
+                          multiprocessing_context=mp.get_context("spawn"), persistent_workers=True, worker_init_fn=seed_worker)
+    ds_test = fetch_data(skew, partition="test", beta=beta, n_clients=n_clients, dataset=1, n_classes=100, num_workers=4, prefetch_factor=1, 
+                         multiprocessing_context=mp.get_context("spawn"), persistent_workers=True, worker_init_fn=seed_worker)
+    ds_val = fetch_data(skew, partition="val", beta=beta, n_clients=n_clients, dataset=1, n_classes=100, num_workers=4,
+                        multiprocessing_context=mp.get_context("spawn"), persistent_workers=True, worker_init_fn=seed_worker)
 
     # Get model
     model_g = ResNet(key=jax.random.key(args.key), layers=[2,2,2,2], dim_out=100, **asymkwargs)
@@ -68,16 +71,16 @@ if __name__ == "__main__":
     )
 
     # Get federated models at each round
-    ckpt_fp = f"analysis/checkpoints/imagenet100{'wasym' if args.wasym else 'fedavg'}_{'heterogeneous' if args.heterogeneous else 'homogeneous'}_key{args.key}"
+    ckpt_fp = f"/data/bucket/traincombmodels/logs/checkpoints/imagenet100{'wasym' if args.wasym else 'fedavg'}_{'heterogeneous' if args.heterogeneous else 'homogeneous'}_key{args.key}"
     train(model_g, opt, ds_train, return_ce(0.), ds_val, local_epochs=30, 
           max_patience=3, val_fn=top_5_err, rounds=10, n_clients=n_clients, ckpt_fp=ckpt_fp)
     
     # Iterate over rounds to check stability
     log = {}
-    paths = os.listdir("analysis/checkpoints/")
+    paths = os.listdir("/data/bucket/traincombmodels/logs/checkpoints/")
     paths = filter(lambda fp: fp.startswith(os.path.split(ckpt_fp)[-1]), paths)
     paths = map(lambda s: (
-        int(s.split("_")[-2]), int(s.split("_")[-1].split(".")[0]), os.path.join("analysis/checkpoints/", s)
+        int(s.split("_")[-2]), int(s.split("_")[-1].split(".")[0]), os.path.join("/data/bucket/traincombmodels/logs/checkpoints/", s)
     ), paths)
     paths = sorted(paths)
     for i, (r, epoch, models_path) in enumerate(paths):
@@ -100,4 +103,4 @@ if __name__ == "__main__":
         instability = instability.mean().item()
         # Log results
         log[r] = instability
-        json.dump(log, open(f"analysis/stability_{'wasym' if args.wasym else 'fedavg'}_{'heterogeneous' if args.heterogeneous else 'homogeneous'}_key{args.key}.json", "w"))
+        json.dump(log, open(f"/data/bucket/traincombmodels/logs/stability_{'wasym' if args.wasym else 'fedavg'}_{'heterogeneous' if args.heterogeneous else 'homogeneous'}_key{args.key}.json", "w"))
