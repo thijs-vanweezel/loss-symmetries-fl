@@ -39,6 +39,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_clients", type=int, default=4, help="Number of clients to simulate")
     parser.add_argument("--wasym", action=argparse.BooleanOptionalAction, default=False, help="Whether to use W-Asymmetry or not")
     parser.add_argument("--heterogeneous", action=argparse.BooleanOptionalAction, default=False, help="Type of client drift to induce")
+    parser.add_argument("--key", type=int, default=42, help="Value of the random seed.")
     args = parser.parse_args()
     n_clients = args.n_clients
     # Fill kwargs
@@ -58,7 +59,7 @@ if __name__ == "__main__":
     ds_val = fetch_data(skew, partition="val", beta=beta, n_clients=n_clients, dataset=1, n_classes=100)
 
     # Get model
-    model_g = ResNet(key=jax.random.key(42), layers=[2,2,2,2], dim_out=100, **asymkwargs)
+    model_g = ResNet(key=jax.random.key(args.key), layers=[2,2,2,2], dim_out=100, **asymkwargs)
     lr = optax.warmup_exponential_decay_schedule(1e-6, 3e-3, 1000, 2000, 0.9, end_value=1e-5)
     opt = nnx.Optimizer(
         model_g,
@@ -67,7 +68,7 @@ if __name__ == "__main__":
     )
 
     # Get federated models at each round
-    ckpt_fp = f"analysis/checkpoints/imagenet100{'wasym' if args.wasym else 'fedavg'}_{'heterogeneous' if args.heterogeneous else 'homogeneous'}"
+    ckpt_fp = f"analysis/checkpoints/imagenet100{'wasym' if args.wasym else 'fedavg'}_{'heterogeneous' if args.heterogeneous else 'homogeneous'}_key{args.key}"
     train(model_g, opt, ds_train, return_ce(0.), ds_val, local_epochs=30, 
           max_patience=3, val_fn=top_5_err, rounds=10, n_clients=n_clients, ckpt_fp=ckpt_fp)
     
@@ -99,4 +100,4 @@ if __name__ == "__main__":
         instability = instability.mean().item()
         # Log results
         log[r] = instability
-        json.dump(log, open(f"analysis/stability_{'wasym' if args.wasym else 'fedavg'}_{'heterogeneous' if args.heterogeneous else 'homogeneous'}.json", "w"))
+        json.dump(log, open(f"analysis/stability_{'wasym' if args.wasym else 'fedavg'}_{'heterogeneous' if args.heterogeneous else 'homogeneous'}_key{args.key}.json", "w"))
