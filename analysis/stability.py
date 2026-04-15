@@ -71,36 +71,38 @@ if __name__ == "__main__":
     )
 
     # Get federated models at each round
-    ckpt_fp = f"/data/bucket/traincombmodels/logs/checkpoints/imagenet100{'wasym' if args.wasym else 'fedavg'}_{'heterogeneous' if args.heterogeneous else 'homogeneous'}_key{args.key}"
+    dirname = f"/data/bucket/traincombmodels/logs/checkpoints/imagenet100_{'wasym' if args.wasym else 'fedavg'}_{'heterogeneous' if args.heterogeneous else 'homogeneous'}_key{args.key}"
+    os.makedirs(dirname, exist_ok=True)
     train(model_g, opt, ds_train, return_ce(0.), ds_val, local_epochs=30, 
-          max_patience=3, val_fn=top_5_err, rounds=10, n_clients=n_clients, ckpt_fp=ckpt_fp)
+          max_patience=3, val_fn=top_5_err, rounds=10, n_clients=n_clients, ckpt_fp=os.path.join(dirname, "r_e_"))
     
     # Iterate over rounds to check stability
     log = {}
-    paths = os.listdir("/data/bucket/traincombmodels/logs/checkpoints/")
-    paths = filter(lambda fp: fp.startswith(os.path.split(ckpt_fp)[-1]), paths)
+    paths = os.listdir(dirname)
     paths = map(lambda s: (
-        int(s.split("_")[-2]), int(s.split("_")[-1].split(".")[0]), os.path.join("/data/bucket/traincombmodels/logs/checkpoints/", s)
+        int(s.split("_")[-2]), int(s.split("_")[-1].split(".")[0]), os.path.join(dirname, s)
     ), paths)
     paths = sorted(paths)
     for i, (r, epoch, models_path) in enumerate(paths):
-        if (i!=len(paths)-1) and (not epoch>paths[i+1][1]) and (epoch==0 or r==paths[i-1][0]) and (os.path.split(ckpt_fp)[-1] in models_path):
+        # not very last file    and    not last epoch    and    round is the same as previous file 
+        if (i!=len(paths)-1) and (not epoch>paths[i+1][1]) and (epoch==0 or r==paths[i-1][0]):
             shutil.rmtree(models_path)
             continue
         else:
-            print(f"Checking round {r} at epoch {epoch}...")
+            print(f"Checking stability at round {r} (epoch {epoch})", end="")
             fl_models = load_model(lambda: cast(ResNet(layers=[2,2,2,2], dim_out=100, **asymkwargs), n_clients), models_path)
         # Check LMC
         err_fn = nnx.jit(nnx.vmap(_err_fn))
         lmc:dict[float, jax.Array] = {}
-        for alpha in tqdm(jnp.linspace(0.,1.,30).tolist(), leave=False):
+        for alpha in tqdm(jnp.linspace(0.,1.,10).tolist(), leave=False):
             models_agg = partial_aggregate(fl_models, alpha)
-            err= reduce(lambda acc, b: acc + err_fn(models_agg,*b), ds_test, 0.) / len(ds_test)
+            err = reduce(lambda acc, b: acc + err_fn(models_agg,*b), ds_test, 0.) / len(ds_test)
             lmc[alpha] = err
         # Get instability measure inspired by Frankle
         max_alpha = max(lmc, key=lambda k: lmc[k].mean().item())
         instability = lmc[max_alpha] - lmc[0.]
         instability = instability.mean().item()
+        print(f": instability found at alpha {max_alpha} = {instability*100}%")
         # Log results
         log[r] = instability
         json.dump(log, open(f"/data/bucket/traincombmodels/logs/stability_{'wasym' if args.wasym else 'fedavg'}_{'heterogeneous' if args.heterogeneous else 'homogeneous'}_key{args.key}.json", "w"))
