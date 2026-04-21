@@ -21,7 +21,7 @@ import jax, optax, argparse, shutil, json, multiprocessing as mp
 from backend.fedflax import train, cast
 from backend.models import ResNet
 from backend.data import fetch_data, seed_worker
-from backend.utils import return_ce, top_5_err, err_fn as _err_fn, load_model
+from backend.utils import top_5_err, err_fn as _err_fn, load_model, nnx_norm
 from jax import numpy as jnp
 from flax import nnx
 from functools import reduce
@@ -37,15 +37,25 @@ if __name__ == "__main__":
     # Allow user-specified arguments
     parser = argparse.ArgumentParser(description="Analyze stability of a ResNet trained on ImageNet in a federated setting")
     parser.add_argument("--n_clients", type=int, default=4, help="Number of clients to simulate")
-    parser.add_argument("--wasym", action=argparse.BooleanOptionalAction, default=False, help="Whether to use W-Asymmetry or not")
+    parser.add_argument("--asymtype", type=str, default="", help="Type of asymmetry to use", choices=["", "wasym", "syre", "normweights", "dimexp"])
     parser.add_argument("--heterogeneous", action=argparse.BooleanOptionalAction, default=False, help="Type of client drift to induce")
     parser.add_argument("--key", type=int, default=42, help="Value of the random seed.")
     args = parser.parse_args()
     n_clients = args.n_clients
     # Fill kwargs
     asymkwargs = {}
-    asymkwargs["wasym"] = args.wasym
-    asymkwargs["kappa"] = 1
+    ell = lambda m, mg, y, x: optax.softmax_cross_entropy_with_integer_labels(m(x, train=True), y).mean()
+    if args.asymtype == "wasym":
+        asymkwargs["wasym"] = True
+        asymkwargs["kappa"] = 1
+    elif args.asymtype == "syre":
+        asymkwargs["sigma"] = 1e-4
+        ell = lambda m, mg, y, x: optax.softmax_cross_entropy_with_integer_labels(m(x, train=True), y).mean() \
+            + 1e-4*nnx_norm(nnx.state(m, nnx.Param))
+    elif args.asymtype == "normweights":
+        asymkwargs["normweights"] = True
+    elif args.asymtype == "dimexp":
+        asymkwargs["dimexp"] = 2
     if args.heterogeneous:
         skew = "label"
         beta = 1.
@@ -71,9 +81,9 @@ if __name__ == "__main__":
     )
 
     # Get federated models at each round
-    dirname = f"/data/bucket/traincombmodels/logs/checkpoints/imagenet100_{'wasym' if args.wasym else 'fedavg'}_{'heterogeneous' if args.heterogeneous else 'homogeneous'}_key{args.key}"
+    dirname = f"/data/bucket/traincombmodels/logs/checkpoints/imagenet100_{args.asymtype or 'base'}_{'heterogeneous' if args.heterogeneous else 'homogeneous'}_key{args.key}"
     os.makedirs(dirname, exist_ok=True)
-    train(model_g, opt, ds_train, return_ce(0.), ds_val, local_epochs=30, 
+    train(model_g, opt, ds_train, ell, ds_val, local_epochs=30, 
           max_patience=3, val_fn=top_5_err, rounds=10, n_clients=n_clients, ckpt_fp=os.path.join(dirname, "r_e_"))
     
     # Iterate over rounds to check stability
@@ -105,4 +115,4 @@ if __name__ == "__main__":
         print(f": instability found at alpha {max_alpha} = {instability*100}%")
         # Log results
         log[r] = instability
-        json.dump(log, open(f"/data/bucket/traincombmodels/logs/stability_{'wasym' if args.wasym else 'fedavg'}_{'heterogeneous' if args.heterogeneous else 'homogeneous'}_key{args.key}.json", "w"))
+        json.dump(log, open(f"/data/bucket/traincombmodels/logs/stability_{args.asymtype or 'base'}_{'heterogeneous' if args.heterogeneous else 'homogeneous'}_key{args.key}.json", "w"))
